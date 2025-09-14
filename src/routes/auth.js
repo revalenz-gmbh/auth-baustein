@@ -194,6 +194,12 @@ router.get('/oauth/google/callback', async (req, res) => {
       if (window.opener) {
         window.opener.postMessage({ type: 'auth_token', token: token }, ${JSON.stringify(safeOrigin)});
       }
+      // Versuche den Token in die Zwischenablage zu kopieren (als Fallback)
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(String(token)).catch(function(){});
+        }
+      } catch(e) {}
       if (${JSON.stringify(!!returnUrl)}) {
         try { window.location.replace(${JSON.stringify(returnUrl)} + ( ${JSON.stringify(returnUrl)}.includes('?') ? '&' : '?' ) + 'token=' + encodeURIComponent(token)); } catch(e) {}
       }
@@ -204,6 +210,12 @@ router.get('/oauth/google/callback', async (req, res) => {
 </body></html>`;
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       return res.status(200).send(html);
+    }
+    // Redirect-Flow: Wenn returnUrl vorhanden, per 302 zurück zur Admin-Seite inkl. Token
+    if (state && typeof state.returnUrl === 'string' && state.returnUrl) {
+      const returnUrl = state.returnUrl;
+      const sep = returnUrl.includes('?') ? '&' : '?';
+      return res.redirect(302, `${returnUrl}${sep}token=${encodeURIComponent(token)}`);
     }
     // Standard: JSON-Antwort
     return res.json({ success:true, token });
