@@ -139,11 +139,13 @@ router.get('/oauth/google/callback', async (req, res) => {
       headers: { 'Authorization': `Bearer ${tokenJson.access_token}` }
     });
     const user = await userRes.json();
-    if (!user.email) return res.status(400).json({ success:false, message:'no email from provider' });
+    if (!user.email) {
+      return sendOauthError(req, res, { code: 400, message: 'no email from provider' });
+    }
 
     const allowedDomain = (process.env.ALLOWED_DOMAIN || '').trim();
     if (allowedDomain && !String(user.email).toLowerCase().endsWith(`@${allowedDomain.toLowerCase()}`)) {
-      return res.status(403).json({ success:false, message:'email domain not allowed' });
+      return sendOauthError(req, res, { code: 403, message: 'email domain not allowed', slug: 'domain_not_allowed' });
     }
 
     // 1) Existiert bereits ein Account mit diesem Provider?
@@ -220,8 +222,51 @@ router.get('/oauth/google/callback', async (req, res) => {
     return res.json({ success:true, token });
   } catch (e) {
     console.error('OAuth callback error', e);
-    return res.status(500).json({ success:false, message:'oauth failed' });
+    return sendOauthError(req, res, { code: 500, message: 'oauth failed' });
   }
 });
 
 export default router;
+
+function sendOauthError(req, res, { code = 400, message = 'oauth failed', slug = '' } = {}){
+  try {
+    // Versuche State zu lesen, um Popup/Redirect unterscheiden zu können
+    let stateRaw = (req.query.state || '').toString();
+    let state = {};
+    try { state = JSON.parse(Buffer.from(stateRaw, 'base64url').toString('utf8')); }
+    catch { state = { nonce: stateRaw }; }
+    // Popup-Modus: eine kleine HTML-Seite liefern, die dem Opener den Fehler sendet und das Fenster schließt
+    if (state && state.mode === 'popup') {
+      const safeOrigin = typeof state.origin === 'string' && state.origin.startsWith('http')
+        ? state.origin
+        : '*';
+      const returnUrl = typeof state.returnUrl === 'string' && state.returnUrl ? state.returnUrl : '';
+      const html = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Login fehlgeschlagen</title></head>
+<body>
+<p>Login fehlgeschlagen. Dieses Fenster wird automatisch geschlossen.</p>
+<script>
+(function(){
+  try {
+    if (window.opener) {
+      window.opener.postMessage({ type: 'auth_error', message: ${JSON.stringify(message)}, slug: ${JSON.stringify(slug)} }, ${JSON.stringify(safeOrigin)});
+    }
+    if (${JSON.stringify(!!returnUrl)}) {
+      try { window.location.replace(${JSON.stringify(returnUrl)} + '#error=' + encodeURIComponent(${JSON.stringify(slug || 'oauth_failed')})); } catch(e) {}
+    }
+  } catch (e) {}
+  setTimeout(function(){ window.close(); }, 300);
+})();
+</script>
+</body></html>`;
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      return res.status(code).send(html);
+    }
+    // Redirect-Modus / ohne State: zur Admin-Seite mit Fehler im Hash zurückleiten, sofern "return" mitgegeben wurde
+    const returnUrl = (req.query.return || req.query.returnUrl || '').toString();
+    if (returnUrl) {
+      return res.redirect(302, `${returnUrl}#error=${encodeURIComponent(slug || 'oauth_failed')}`);
+    }
+  } catch(_) {}
+  return res.status(code).json({ success:false, message });
+}
