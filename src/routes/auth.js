@@ -92,8 +92,10 @@ router.get('/oauth/google', (req, res) => {
   let stateObj = { nonce: Math.random().toString(36).slice(2) };
   const mode = (req.query.mode || '').toString();
   const origin = (req.query.origin || '').toString();
+  const returnUrl = (req.query.return || '').toString();
   if (mode) stateObj.mode = mode;
   if (origin) stateObj.origin = origin;
+  if (returnUrl) stateObj.returnUrl = returnUrl;
   let state;
   try { state = Buffer.from(JSON.stringify(stateObj)).toString('base64url'); }
   catch { state = stateObj.nonce; }
@@ -180,6 +182,7 @@ router.get('/oauth/google/callback', async (req, res) => {
       const safeOrigin = typeof state.origin === 'string' && state.origin.startsWith('http')
         ? state.origin
         : '*';
+      const returnUrl = typeof state.returnUrl === 'string' && state.returnUrl ? state.returnUrl : '';
       const html = `<!doctype html>
 <html><head><meta charset="utf-8"><title>Login erfolgreich</title></head>
 <body>
@@ -190,6 +193,9 @@ router.get('/oauth/google/callback', async (req, res) => {
       var token = ${JSON.stringify(token)};
       if (window.opener) {
         window.opener.postMessage({ type: 'auth_token', token: token }, ${JSON.stringify(safeOrigin)});
+      }
+      if (${JSON.stringify(!!returnUrl)}) {
+        try { window.location.replace(${JSON.stringify(returnUrl)} + ( ${JSON.stringify(returnUrl)}.includes('?') ? '&' : '?' ) + 'token=' + encodeURIComponent(token)); } catch(e) {}
       }
     } catch (e) {}
     setTimeout(function(){ window.close(); }, 200);
