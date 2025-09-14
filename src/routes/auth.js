@@ -88,7 +88,15 @@ router.get('/oauth/google', (req, res) => {
     return res.status(500).json({ success:false, message:'GOOGLE_CLIENT_ID missing (ENV)' });
   }
   const redirectUri = buildRedirectUri();
-  const state = Math.random().toString(36).slice(2);
+  // State mit Metadaten (Popup-Flow, erlaubte Origin)
+  let stateObj = { nonce: Math.random().toString(36).slice(2) };
+  const mode = (req.query.mode || '').toString();
+  const origin = (req.query.origin || '').toString();
+  if (mode) stateObj.mode = mode;
+  if (origin) stateObj.origin = origin;
+  let state;
+  try { state = Buffer.from(JSON.stringify(stateObj)).toString('base64url'); }
+  catch { state = stateObj.nonce; }
   const scope = encodeURIComponent('openid email profile');
   const url = `${GOOGLE_AUTH_URL}?response_type=code&client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}&state=${state}&access_type=offline&prompt=consent`;
   return res.redirect(url);
@@ -98,6 +106,11 @@ router.get('/oauth/google/callback', async (req, res) => {
   try {
     const code = req.query.code;
     if (!code) return res.status(400).json({ success:false, message:'code missing' });
+    // State parsen (Popup-Flow, erlaubte Origin)
+    let stateRaw = (req.query.state || '').toString();
+    let state = {};
+    try { state = JSON.parse(Buffer.from(stateRaw, 'base64url').toString('utf8')); }
+    catch { state = { nonce: stateRaw }; }
     if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
       console.error('Missing GOOGLE_CLIENT_ID/SECRET');
       return res.status(500).json({ success:false, message:'GOOGLE_CLIENT_ID/SECRET missing (ENV)' });
@@ -162,6 +175,31 @@ router.get('/oauth/google/callback', async (req, res) => {
     }
 
     const token = signToken(admin);
+    // Popup-Flow: Token via postMessage an opener zurückgeben
+    if (state && state.mode === 'popup') {
+      const safeOrigin = typeof state.origin === 'string' && state.origin.startsWith('http')
+        ? state.origin
+        : '*';
+      const html = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Login erfolgreich</title></head>
+<body>
+<p>Login erfolgreich. Dieses Fenster wird automatisch geschlossen.</p>
+<script>
+  (function(){
+    try {
+      var token = ${JSON.stringify(token)};
+      if (window.opener) {
+        window.opener.postMessage({ type: 'auth_token', token: token }, ${JSON.stringify(safeOrigin)});
+      }
+    } catch (e) {}
+    setTimeout(function(){ window.close(); }, 200);
+  })();
+</script>
+</body></html>`;
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      return res.status(200).send(html);
+    }
+    // Standard: JSON-Antwort
     return res.json({ success:true, token });
   } catch (e) {
     console.error('OAuth callback error', e);
