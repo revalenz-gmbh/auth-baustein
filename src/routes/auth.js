@@ -1,0 +1,147 @@
+import express from 'express';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import { query } from '../utils/db.js';
+
+const router = express.Router();
+
+function signToken(admin){
+  return jwt.sign(
+    { sub: String(admin.id), email: admin.email, roles: ['admin'] },
+    process.env.AUTH_JWT_SECRET,
+    { expiresIn: '8h' }
+  );
+}
+
+router.post('/register', async (req, res) => {
+  try {
+    const setup = req.headers['x-setup-token'];
+    if (!setup || setup !== process.env.SETUP_TOKEN) {
+      return res.status(403).json({ success: false, message: 'Forbidden' });
+    }
+    const { name, email, password } = req.body || {};
+    if (!email || !password) return res.status(400).json({ success: false, message: 'email & password required' });
+    const hash = await bcrypt.hash(password, 10);
+    const result = await query(
+      'INSERT INTO admins (name, email, password_hash) VALUES ($1,$2,$3) ON CONFLICT (email) DO NOTHING RETURNING id, name, email, created_at',
+      [name || '', email, hash]
+    );
+    if (result.rowCount === 0) return res.status(409).json({ success: false, message: 'email exists' });
+    return res.json({ success: true, data: result.rows[0] });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ success: false, message: 'register failed' });
+  }
+});
+
+router.post('/login', async (req, res) => {
+  try {
+    const { email, password, api_key } = req.body || {};
+    let admin;
+    if (api_key) {
+      const r = await query('SELECT * FROM admins WHERE api_key = $1', [api_key]);
+      admin = r.rows[0];
+    } else if (email && password) {
+      const r = await query('SELECT * FROM admins WHERE email = $1', [email]);
+      admin = r.rows[0];
+      if (!admin) return res.status(401).json({ success: false, message: 'invalid credentials' });
+      const ok = await bcrypt.compare(password, admin.password_hash || '');
+      if (!ok) return res.status(401).json({ success: false, message: 'invalid credentials' });
+    } else {
+      return res.status(400).json({ success: false, message: 'email+password or api_key required' });
+    }
+
+    const token = signToken(admin);
+    return res.json({ success: true, token });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ success: false, message: 'login failed' });
+  }
+});
+
+router.get('/me', async (req, res) => {
+  try {
+    const auth = req.headers.authorization || '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+    if (!token) return res.status(401).json({ success: false, message: 'Unauthorized' });
+    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
+    return res.json({ success: true, data: payload });
+  } catch (e) {
+    return res.status(401).json({ success: false, message: 'Invalid token' });
+  }
+});
+
+// --- Google OAuth (minimal, ohne externe Libs) ---
+const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
+const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+const GOOGLE_USERINFO_URL = 'https://www.googleapis.com/oauth2/v3/userinfo';
+
+function buildRedirectUri(){
+  const base = process.env.OAUTH_REDIRECT_BASE || 'http://localhost:4000';
+  return `${base}/auth/oauth/google/callback`;
+}
+
+router.get('/oauth/google', (req, res) => {
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const redirectUri = buildRedirectUri();
+  const state = Math.random().toString(36).slice(2);
+  const scope = encodeURIComponent('openid email profile');
+  const url = `${GOOGLE_AUTH_URL}?response_type=code&client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}&state=${state}&access_type=offline&prompt=consent`;
+  res.redirect(url);
+});
+
+router.get('/oauth/google/callback', async (req, res) => {
+  try {
+    const code = req.query.code;
+    if (!code) return res.status(400).json({ success:false, message:'code missing' });
+    const params = new URLSearchParams();
+    params.append('code', code);
+    params.append('client_id', process.env.GOOGLE_CLIENT_ID);
+    params.append('client_secret', process.env.GOOGLE_CLIENT_SECRET);
+    params.append('redirect_uri', buildRedirectUri());
+    params.append('grant_type', 'authorization_code');
+
+    const tokenRes = await fetch(GOOGLE_TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params
+    });
+    const tokenJson = await tokenRes.json();
+    if (!tokenRes.ok) {
+      return res.status(400).json({ success:false, message:'token exchange failed', detail: tokenJson });
+    }
+
+    const userRes = await fetch(GOOGLE_USERINFO_URL, {
+      headers: { 'Authorization': `Bearer ${tokenJson.access_token}` }
+    });
+    const user = await userRes.json();
+    if (!user.email) return res.status(400).json({ success:false, message:'no email from provider' });
+
+    // optional: Domain-Whitelist
+    const allowedDomain = (process.env.ALLOWED_DOMAIN || '').trim();
+    if (allowedDomain && !String(user.email).toLowerCase().endsWith(`@${allowedDomain.toLowerCase()}`)) {
+      return res.status(403).json({ success:false, message:'email domain not allowed' });
+    }
+
+    // Upsert Admin
+    const upsert = await query(
+      `INSERT INTO admins (name, email, provider, provider_id)
+       VALUES ($1,$2,'google',$3)
+       ON CONFLICT (provider, provider_id)
+       DO UPDATE SET name=EXCLUDED.name, email=EXCLUDED.email
+       RETURNING id, email`,
+      [user.name || user.email, user.email, user.sub]
+    );
+
+    const admin = upsert.rows[0];
+    const token = signToken(admin);
+
+    // Ausgabe als JSON; alternativ Redirect mit token in Fragment
+    return res.json({ success:true, token });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ success:false, message:'oauth failed' });
+  }
+});
+
+export default router;

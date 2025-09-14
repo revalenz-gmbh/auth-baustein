@@ -1,0 +1,18 @@
+# Node
+node_modules/
+.npmrc
+
+# Env/Secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+logs/
+*.log
+
+# OS/Editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
