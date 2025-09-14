@@ -71,7 +71,7 @@ router.get('/me', async (req, res) => {
   }
 });
 
-// --- Google OAuth (minimal, ohne externe Libs) ---
+// --- Google OAuth ---
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GOOGLE_USERINFO_URL = 'https://www.googleapis.com/oauth2/v3/userinfo';
@@ -83,17 +83,25 @@ function buildRedirectUri(){
 
 router.get('/oauth/google', (req, res) => {
   const clientId = process.env.GOOGLE_CLIENT_ID;
+  if (!clientId) {
+    console.error('Missing GOOGLE_CLIENT_ID');
+    return res.status(500).json({ success:false, message:'GOOGLE_CLIENT_ID missing (ENV)' });
+  }
   const redirectUri = buildRedirectUri();
   const state = Math.random().toString(36).slice(2);
   const scope = encodeURIComponent('openid email profile');
   const url = `${GOOGLE_AUTH_URL}?response_type=code&client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}&state=${state}&access_type=offline&prompt=consent`;
-  res.redirect(url);
+  return res.redirect(url);
 });
 
 router.get('/oauth/google/callback', async (req, res) => {
   try {
     const code = req.query.code;
     if (!code) return res.status(400).json({ success:false, message:'code missing' });
+    if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+      console.error('Missing GOOGLE_CLIENT_ID/SECRET');
+      return res.status(500).json({ success:false, message:'GOOGLE_CLIENT_ID/SECRET missing (ENV)' });
+    }
     const params = new URLSearchParams();
     params.append('code', code);
     params.append('client_id', process.env.GOOGLE_CLIENT_ID);
@@ -108,6 +116,7 @@ router.get('/oauth/google/callback', async (req, res) => {
     });
     const tokenJson = await tokenRes.json();
     if (!tokenRes.ok) {
+      console.error('Google token error', tokenJson);
       return res.status(400).json({ success:false, message:'token exchange failed', detail: tokenJson });
     }
 
@@ -117,13 +126,11 @@ router.get('/oauth/google/callback', async (req, res) => {
     const user = await userRes.json();
     if (!user.email) return res.status(400).json({ success:false, message:'no email from provider' });
 
-    // optional: Domain-Whitelist
     const allowedDomain = (process.env.ALLOWED_DOMAIN || '').trim();
     if (allowedDomain && !String(user.email).toLowerCase().endsWith(`@${allowedDomain.toLowerCase()}`)) {
       return res.status(403).json({ success:false, message:'email domain not allowed' });
     }
 
-    // Upsert Admin
     const upsert = await query(
       `INSERT INTO admins (name, email, provider, provider_id)
        VALUES ($1,$2,'google',$3)
@@ -135,11 +142,9 @@ router.get('/oauth/google/callback', async (req, res) => {
 
     const admin = upsert.rows[0];
     const token = signToken(admin);
-
-    // Ausgabe als JSON; alternativ Redirect mit token in Fragment
     return res.json({ success:true, token });
   } catch (e) {
-    console.error(e);
+    console.error('OAuth callback error', e);
     return res.status(500).json({ success:false, message:'oauth failed' });
   }
 });
