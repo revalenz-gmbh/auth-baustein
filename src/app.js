@@ -6,7 +6,17 @@ import authRoutes from './routes/auth.js';
 export function buildApp() {
   const app = express();
   app.use(helmet({ contentSecurityPolicy: false }));
-  app.use(cors());
+  const allowedOrigins = (process.env.CORS_ORIGINS || 'https://benefizshow.de,https://www.benefizshow.de').split(',').map(s => s.trim());
+  app.use(cors({
+    origin: function(origin, callback){
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+      return callback(new Error('Not allowed by CORS'));
+    },
+    credentials: false,
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    methods: ['GET','POST','OPTIONS']
+  }));
   app.use(express.json());
 
   app.get('/', (req, res) => res.json({ name: 'auth-baustein', status: 'ok' }));

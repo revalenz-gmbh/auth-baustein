@@ -9,7 +9,7 @@ function signToken(admin){
   return jwt.sign(
     { sub: String(admin.id), email: admin.email, roles: ['admin'] },
     process.env.AUTH_JWT_SECRET,
-    { expiresIn: '8h' }
+    { expiresIn: '1h' }
   );
 }
 
@@ -201,7 +201,7 @@ router.get('/oauth/google/callback', async (req, res) => {
         }
       } catch(e) {}
       if (${JSON.stringify(!!returnUrl)}) {
-        try { window.location.replace(${JSON.stringify(returnUrl)} + ( ${JSON.stringify(returnUrl)}.includes('?') ? '&' : '?' ) + 'token=' + encodeURIComponent(token)); } catch(e) {}
+        try { window.location.replace(${JSON.stringify(returnUrl)} + '#token=' + encodeURIComponent(token)); } catch(e) {}
       }
     } catch (e) {}
     setTimeout(function(){ window.close(); }, 200);
@@ -214,8 +214,7 @@ router.get('/oauth/google/callback', async (req, res) => {
     // Redirect-Flow: Wenn returnUrl vorhanden, per 302 zurück zur Admin-Seite inkl. Token
     if (state && typeof state.returnUrl === 'string' && state.returnUrl) {
       const returnUrl = state.returnUrl;
-      const sep = returnUrl.includes('?') ? '&' : '?';
-      return res.redirect(302, `${returnUrl}${sep}token=${encodeURIComponent(token)}`);
+      return res.redirect(302, `${returnUrl}#token=${encodeURIComponent(token)}`);
     }
     // Standard: JSON-Antwort
     return res.json({ success:true, token });
