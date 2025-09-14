@@ -131,16 +131,36 @@ router.get('/oauth/google/callback', async (req, res) => {
       return res.status(403).json({ success:false, message:'email domain not allowed' });
     }
 
-    const upsert = await query(
-      `INSERT INTO admins (name, email, provider, provider_id)
-       VALUES ($1,$2,'google',$3)
-       ON CONFLICT (provider, provider_id)
-       DO UPDATE SET name=EXCLUDED.name, email=EXCLUDED.email
-       RETURNING id, email`,
-      [user.name || user.email, user.email, user.sub]
+    // 1) Existiert bereits ein Account mit diesem Provider?
+    const byProvider = await query(
+      'SELECT * FROM admins WHERE provider=$1 AND provider_id=$2', ['google', user.sub]
     );
+    let admin;
+    if (byProvider.rowCount > 0) {
+      admin = byProvider.rows[0];
+    } else {
+      // 2) Sonst: Gibt es bereits einen Account mit der E-Mail? Dann Provider verknüpfen
+      const byEmail = await query('SELECT * FROM admins WHERE email=$1', [user.email]);
+      if (byEmail.rowCount > 0) {
+        const upd = await query(
+          'UPDATE admins SET provider=$1, provider_id=$2 WHERE id=$3 RETURNING id, email',
+          ['google', user.sub, byEmail.rows[0].id]
+        );
+        admin = upd.rows[0];
+      } else {
+        // 3) Neu anlegen
+        const ins = await query(
+          `INSERT INTO admins (name, email, provider, provider_id)
+           VALUES ($1,$2,'google',$3)
+           ON CONFLICT (provider, provider_id)
+           DO UPDATE SET name=EXCLUDED.name, email=EXCLUDED.email
+           RETURNING id, email`,
+          [user.name || user.email, user.email, user.sub]
+        );
+        admin = ins.rows[0];
+      }
+    }
 
-    const admin = upsert.rows[0];
     const token = signToken(admin);
     return res.json({ success:true, token });
   } catch (e) {
