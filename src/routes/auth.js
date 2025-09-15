@@ -295,3 +295,24 @@ router.get('/tenants', async (req, res) => {
     return res.status(401).json({ success:false, message:'Invalid token' });
   }
 });
+
+// Tenant anlegen und eingeloggten Admin zuordnen
+router.post('/tenants', async (req, res) => {
+  try {
+    const auth = req.headers.authorization || '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
+    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
+    const { name } = req.body || {};
+    if (!name || String(name).trim().length < 2) {
+      return res.status(400).json({ success:false, message:'name required' });
+    }
+    const ins = await query('INSERT INTO tenants (name) VALUES ($1) RETURNING id, name', [name]);
+    const tenant = ins.rows[0];
+    await query('INSERT INTO tenant_admins (tenant_id, admin_id, role) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING', [tenant.id, payload.sub, 'owner']);
+    return res.status(201).json({ success:true, data: tenant });
+  } catch (e) {
+    console.error('create tenant error', e);
+    return res.status(500).json({ success:false, message:'create tenant failed' });
+  }
+});
