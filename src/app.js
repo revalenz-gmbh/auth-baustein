@@ -6,11 +6,18 @@ import authRoutes from './routes/auth.js';
 export function buildApp() {
   const app = express();
   app.use(helmet({ contentSecurityPolicy: false }));
-  const allowedOrigins = (process.env.CORS_ORIGINS || 'https://benefizshow.de,https://www.benefizshow.de').split(',').map(s => s.trim());
+  const defaults = ['https://benefizshow.de','https://www.benefizshow.de'];
+  const envList = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
+  const allowedOrigins = Array.from(new Set([...defaults, ...envList]));
   const corsOptions = {
     origin: function(origin, callback){
       if (!origin) return callback(null, true);
       if (allowedOrigins.includes(origin)) return callback(null, true);
+      // Optional: Subdomains von benefizshow.de erlauben
+      try {
+        const u = new URL(origin);
+        if (u.hostname.endsWith('.benefizshow.de')) return callback(null, true);
+      } catch {}
       return callback(new Error('Not allowed by CORS'));
     },
     credentials: false,
