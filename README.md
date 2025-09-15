@@ -23,6 +23,10 @@ Leichtgewichtiger Auth-Service (Express + PostgreSQL + JWT), als eigener Baustei
   Variante A (Passwort): `{ "email":"admin@example.com", "password":"Str0ng!PW" }`  
   Variante B (API-Key): `{ "api_key":"<API_KEY>" }`
 - `GET /auth/me` (Header `Authorization: Bearer <JWT>`) → gibt Token-Claims zurück
+- `GET /auth/oauth/google` – Startet Google Login
+- `GET /auth/oauth/google/callback` – OAuth Callback
+
+Hinweis: Auf Vercel werden alle Anfragen unter `/api/*` durch `api/[...all].js` entgegengenommen, das `/api` vor der Übergabe an Express entfernt.
 
 ## Integration in Ticketservice
 - JWT prüfen mit `AUTH_JWT_SECRET` (HS256)
