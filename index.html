@@ -3,6 +3,103 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Revalenz Accounts</title>
+  <link rel="icon" href="data:,">
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin: 24px; color: #111; }
+    h1 { color: #0f766e; }
+    .row { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; }
+    input, button { padding: 8px 12px; font-size: 14px; }
+    button { background: #0f766e; color: #fff; border: 0; border-radius: 6px; cursor: pointer; }
+    button:disabled { opacity: .6; cursor: not-allowed; }
+    ul { padding-left: 18px; }
+    .muted { color: #6b7280; font-size: 12px; }
+    .error { color: #b91c1c; }
+    .success { color: #065f46; }
+  </style>
+  <script src="config.js"></script>
+</head>
+<body>
+  <h1>Revalenz – Veranstalter verwalten</h1>
+  <div class="row">
+    <button onclick="doLogin()">Mit Google anmelden</button>
+    <button onclick="logout()">Logout</button>
+    <span id="auth" class="muted"></span>
+  </div>
+
+  <div class="row">
+    <input id="tenant_name" placeholder="Neuer Veranstalter – Name" />
+    <button onclick="createTenant()">Anlegen</button>
+    <button onclick="loadTenants()">Aktualisieren</button>
+  </div>
+
+  <div id="msg" class="muted"></div>
+  <h2>Meine Veranstalter</h2>
+  <ul id="tenants"></ul>
+
+  <script>
+    const CFG = window.ACCOUNT_CFG || {};
+    const AUTH_BASE = CFG.AUTH_BASE || '/api';
+
+    function getToken(){ try { return localStorage.getItem('acc_jwt') || ''; } catch(_) { return ''; } }
+    function setToken(t){ try { localStorage.setItem('acc_jwt', t || ''); } catch(_) {} renderAuth(); }
+    function renderAuth(){
+      const t = getToken();
+      const el = document.getElementById('auth');
+      el.textContent = t ? 'Angemeldet' : 'Nicht angemeldet';
+      el.className = t ? 'success' : 'muted';
+    }
+    function showMsg(m, ok){ const el = document.getElementById('msg'); el.textContent = m || ''; el.className = ok ? 'success' : 'error'; }
+
+    function doLogin(){
+      const origin = location.origin;
+      const ret = location.href.split('#')[0];
+      window.location.href = `${AUTH_BASE}/auth/oauth/google?mode=redirect&origin=${encodeURIComponent(origin)}&return=${encodeURIComponent(ret)}`;
+    }
+    function logout(){ setToken(''); document.getElementById('tenants').innerHTML=''; showMsg('Abgemeldet', true); }
+
+    async function loadTenants(){
+      const t = getToken(); if (!t){ showMsg('Bitte einloggen', false); return; }
+      try {
+        const res = await fetch(`${AUTH_BASE}/auth/tenants`, { headers: { Authorization: `Bearer ${t}` }});
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`);
+        const ul = document.getElementById('tenants'); ul.innerHTML='';
+        (data.data || []).forEach(x => { const li=document.createElement('li'); li.textContent = `${x.name} (#${x.id})`; ul.appendChild(li); });
+        showMsg(`${(data.data||[]).length} Veranstalter geladen`, true);
+      } catch(e){ showMsg(e.message, false); }
+    }
+
+    async function createTenant(){
+      const t = getToken(); if (!t){ showMsg('Bitte einloggen', false); return; }
+      const name = (document.getElementById('tenant_name')?.value || '').trim();
+      if (!name) { showMsg('Name erforderlich', false); return; }
+      try {
+        const res = await fetch(`${AUTH_BASE}/auth/tenants`, { method:'POST', headers: { 'Content-Type':'application/json', Authorization: `Bearer ${t}` }, body: JSON.stringify({ name }) });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`);
+        showMsg('Veranstalter angelegt', true);
+        document.getElementById('tenant_name').value='';
+        await loadTenants();
+      } catch(e){ showMsg(e.message, false); }
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      renderAuth();
+      const fromHash = (location.hash||'').replace(/^#/, '');
+      const p = new URLSearchParams(fromHash);
+      const token = p.get('token');
+      if (token){ setToken(token); try{ history.replaceState(null, document.title, location.pathname); }catch(_){} }
+    });
+  </script>
+</body>
+</html>
+
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Auth-Baustein</title>
   <link rel="icon" href="data:,">
   <style>
