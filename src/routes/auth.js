@@ -184,7 +184,6 @@ router.get('/oauth/google/callback', async (req, res) => {
       const safeOrigin = typeof state.origin === 'string' && state.origin.startsWith('http')
         ? state.origin
         : '*';
-      const returnUrl = typeof state.returnUrl === 'string' && state.returnUrl ? state.returnUrl : '';
       const html = `<!doctype html>
 <html><head><meta charset="utf-8"><title>Login erfolgreich</title></head>
 <body>
@@ -202,9 +201,6 @@ router.get('/oauth/google/callback', async (req, res) => {
           navigator.clipboard.writeText(String(token)).catch(function(){});
         }
       } catch(e) {}
-      if (${JSON.stringify(!!returnUrl)}) {
-        try { window.location.replace(${JSON.stringify(returnUrl)} + '#token=' + encodeURIComponent(token)); } catch(e) {}
-      }
     } catch (e) {}
     setTimeout(function(){ window.close(); }, 200);
   })();
