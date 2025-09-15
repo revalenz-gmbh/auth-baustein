@@ -5,9 +5,22 @@ import { query } from '../utils/db.js';
 
 const router = express.Router();
 
-function signToken(admin){
+async function fetchTenantsForAdmin(adminId){
+  try {
+    const r = await query(
+      'SELECT t.id, t.name FROM tenant_admins ta JOIN tenants t ON ta.tenant_id = t.id WHERE ta.admin_id = $1',
+      [adminId]
+    );
+    return r.rows || [];
+  } catch {
+    return [];
+  }
+}
+
+function signToken(admin, tenants){
+  const tenantIds = (tenants || []).map(t => String(t.id));
   return jwt.sign(
-    { sub: String(admin.id), email: admin.email, roles: ['admin'] },
+    { sub: String(admin.id), email: admin.email, roles: ['admin'], tenants: tenantIds },
     process.env.AUTH_JWT_SECRET,
     { expiresIn: '1h' }
   );
@@ -51,8 +64,9 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ success: false, message: 'email+password or api_key required' });
     }
 
-    const token = signToken(admin);
-    return res.json({ success: true, token });
+    const tenants = await fetchTenantsForAdmin(admin.id);
+    const token = signToken(admin, tenants);
+    return res.json({ success: true, token, tenants });
   } catch (e) {
     console.error(e);
     return res.status(500).json({ success: false, message: 'login failed' });
@@ -178,7 +192,8 @@ router.get('/oauth/google/callback', async (req, res) => {
       }
     }
 
-    const token = signToken(admin);
+    const tenants = await fetchTenantsForAdmin(admin.id);
+    const token = signToken(admin, tenants);
     // Popup-Flow: Token via postMessage an opener zurückgeben
     if (state && state.mode === 'popup') {
       const safeOrigin = typeof state.origin === 'string' && state.origin.startsWith('http')
@@ -215,7 +230,7 @@ router.get('/oauth/google/callback', async (req, res) => {
       return res.redirect(302, `${returnUrl}#token=${encodeURIComponent(token)}`);
     }
     // Standard: JSON-Antwort
-    return res.json({ success:true, token });
+    return res.json({ success:true, token, tenants });
   } catch (e) {
     console.error('OAuth callback error', e);
     return sendOauthError(req, res, { code: 500, message: 'oauth failed' });
@@ -266,3 +281,17 @@ function sendOauthError(req, res, { code = 400, message = 'oauth failed', slug =
   } catch(_) {}
   return res.status(code).json({ success:false, message });
 }
+
+// Tenants des eingeloggten Admins
+router.get('/tenants', async (req, res) => {
+  try {
+    const auth = req.headers.authorization || '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
+    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
+    const tenants = await fetchTenantsForAdmin(payload.sub);
+    return res.json({ success:true, data: tenants });
+  } catch (e) {
+    return res.status(401).json({ success:false, message:'Invalid token' });
+  }
+});
