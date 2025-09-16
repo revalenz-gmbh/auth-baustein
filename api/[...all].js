@@ -1,5 +1,7 @@
 import { buildApp } from '../src/app.js';
+import { initSchema } from '../src/utils/db.js';
 
+await initSchema();
 const app = buildApp();
 
 export default function handler(req, res) {
