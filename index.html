@@ -65,7 +65,16 @@
         const data = await res.json();
         if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`);
         const ul = document.getElementById('tenants'); ul.innerHTML='';
-        (data.data || []).forEach(x => { const li=document.createElement('li'); li.textContent = `${x.name} (#${x.id})`; ul.appendChild(li); });
+        (data.data || []).forEach(x => {
+          const li=document.createElement('li');
+          const delBtn = document.createElement('button');
+          delBtn.textContent = 'Löschen';
+          delBtn.style.marginLeft = '8px';
+          delBtn.onclick = () => deleteTenant(x.id, x.name);
+          li.textContent = `${x.name} (#${x.id})`;
+          li.appendChild(delBtn);
+          ul.appendChild(li);
+        });
         showMsg(`${(data.data||[]).length} Veranstalter geladen`, true);
       } catch(e){ showMsg(e.message, false); }
     }
@@ -77,9 +86,23 @@
       try {
         const res = await fetch(`${AUTH_BASE}/auth/tenants`, { method:'POST', headers: { 'Content-Type':'application/json', Authorization: `Bearer ${t}` }, body: JSON.stringify({ name }) });
         const data = await res.json();
+        if (res.status === 409) { showMsg('Name existiert bereits', false); return; }
         if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`);
         showMsg('Veranstalter angelegt', true);
         document.getElementById('tenant_name').value='';
+        await loadTenants();
+      } catch(e){ showMsg(e.message, false); }
+    }
+
+    async function deleteTenant(id, name){
+      const t = getToken(); if (!t){ showMsg('Bitte einloggen', false); return; }
+      if (!confirm(`Veranstalter "${name}" wirklich löschen?`)) return;
+      try {
+        const res = await fetch(`${AUTH_BASE}/auth/tenants/${id}`, { method:'DELETE', headers: { Authorization: `Bearer ${t}` }});
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 409) { showMsg('Löschen nicht möglich: abhängige Daten vorhanden', false); return; }
+        if (!res.ok || data.success === false) throw new Error(data.message || `HTTP ${res.status}`);
+        showMsg('Veranstalter gelöscht', true);
         await loadTenants();
       } catch(e){ showMsg(e.message, false); }
     }

@@ -296,6 +296,34 @@ router.get('/tenants', async (req, res) => {
   }
 });
 
+// Tenant löschen (nur wenn keine weiteren Daten vorhanden sind)
+router.delete('/tenants/:id', async (req, res) => {
+  try {
+    const auth = req.headers.authorization || '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
+    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
+    const id = parseInt(req.params.id, 10);
+    if (!id) return res.status(400).json({ success:false, message:'invalid id' });
+
+    // Prüfen: gehört der Admin zum Tenant?
+    const rel = await query('SELECT 1 FROM tenant_admins WHERE tenant_id=$1 AND admin_id=$2', [id, payload.sub]);
+    if (rel.rowCount === 0) return res.status(403).json({ success:false, message:'forbidden' });
+
+    // Nutzungsprüfung: existieren Lizenzen? (später: Events/Orders)
+    const lic = await query('SELECT 1 FROM licenses WHERE tenant_id=$1 LIMIT 1', [id]);
+    if (lic.rowCount > 0) return res.status(409).json({ success:false, message:'tenant has dependent data (licenses)' });
+
+    await query('DELETE FROM tenant_admins WHERE tenant_id=$1', [id]);
+    const del = await query('DELETE FROM tenants WHERE id=$1', [id]);
+    if (del.rowCount === 0) return res.status(404).json({ success:false, message:'not found' });
+    return res.json({ success:true, message:'tenant deleted' });
+  } catch (e) {
+    console.error('delete tenant error', e);
+    return res.status(500).json({ success:false, message:'delete tenant failed' });
+  }
+});
+
 // Tenant anlegen und eingeloggten Admin zuordnen
 router.post('/tenants', async (req, res) => {
   try {
@@ -306,6 +334,11 @@ router.post('/tenants', async (req, res) => {
     const { name } = req.body || {};
     if (!name || String(name).trim().length < 2) {
       return res.status(400).json({ success:false, message:'name required' });
+    }
+    // Prüfen auf Duplikat (case-insensitive)
+    const exists = await query('SELECT id FROM tenants WHERE LOWER(name)=LOWER($1)', [name]);
+    if (exists.rowCount > 0) {
+      return res.status(409).json({ success:false, message:'tenant name exists' });
     }
     const ins = await query('INSERT INTO tenants (name) VALUES ($1) RETURNING id, name', [name]);
     const tenant = ins.rows[0];

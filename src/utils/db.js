@@ -50,6 +50,7 @@ export async function initSchema() {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
+    await query(`CREATE UNIQUE INDEX IF NOT EXISTS tenants_name_key ON tenants(LOWER(name));`);
     await query(`
       CREATE TABLE IF NOT EXISTS tenant_admins (
         tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
