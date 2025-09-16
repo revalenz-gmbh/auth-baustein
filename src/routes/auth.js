@@ -300,7 +300,14 @@ router.get('/tenants', async (req, res) => {
     const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
     if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
     const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
-    const tenants = await fetchTenantsForAdmin(payload.sub);
+    let tenants;
+    const isSuper = Array.isArray(payload.roles) && payload.roles.includes('super');
+    if (isSuper) {
+      const r = await query('SELECT id, name FROM tenants ORDER BY id ASC');
+      tenants = r.rows;
+    } else {
+      tenants = await fetchTenantsForAdmin(payload.sub);
+    }
     return res.json({ success:true, data: tenants });
   } catch (e) {
     return res.status(401).json({ success:false, message:'Invalid token' });
