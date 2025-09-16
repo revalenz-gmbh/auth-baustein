@@ -34,7 +34,7 @@
   </div>
 
   <div id="msg" class="muted"></div>
-  <h2>Meine Veranstalter</h2>
+  <h2>Meine Veranstalter <span id="role" class="muted"></span></h2>
   <ul id="tenants"></ul>
 
   <script>
@@ -48,6 +48,14 @@
       const el = document.getElementById('auth');
       el.textContent = t ? 'Angemeldet' : 'Nicht angemeldet';
       el.className = t ? 'success' : 'muted';
+      // Rolle anzeigen
+      try {
+        if (t){
+          const payload = JSON.parse(atob(t.split('.')[1]));
+          const r = document.getElementById('role');
+          r.textContent = (payload.roles||[]).includes('super') ? '(Super‑Admin)' : '';
+        }
+      } catch(_){ }
     }
     function showMsg(m, ok){ const el = document.getElementById('msg'); el.textContent = m || ''; el.className = ok ? 'success' : 'error'; }
 

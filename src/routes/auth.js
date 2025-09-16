@@ -158,8 +158,14 @@ router.get('/oauth/google/callback', async (req, res) => {
     }
 
     const allowedDomain = (process.env.ALLOWED_DOMAIN || '').trim();
-    if (allowedDomain && !String(user.email).toLowerCase().endsWith(`@${allowedDomain.toLowerCase()}`)) {
-      return sendOauthError(req, res, { code: 403, message: 'email domain not allowed', slug: 'domain_not_allowed' });
+    const superUser = (process.env.SUPER_ADMIN_EMAIL || '').trim().toLowerCase();
+    const userEmail = String(user.email).toLowerCase();
+    if (allowedDomain && !userEmail.endsWith(`@${allowedDomain.toLowerCase()}`) && userEmail !== superUser) {
+      // Zusätzlich prüfen: steht E-Mail in allowed_admins?
+      const allow = await query('SELECT 1 FROM allowed_admins WHERE LOWER(email)=LOWER($1) LIMIT 1', [user.email]);
+      if (allow.rowCount === 0) {
+        return sendOauthError(req, res, { code: 403, message: 'email domain not allowed', slug: 'domain_not_allowed' });
+      }
     }
 
     // 1) Existiert bereits ein Account mit diesem Provider?
@@ -193,7 +199,12 @@ router.get('/oauth/google/callback', async (req, res) => {
     }
 
     const tenants = await fetchTenantsForAdmin(admin.id);
-    const token = signToken(admin, tenants);
+    const roles = (userEmail === superUser) ? ['admin','super'] : ['admin'];
+    const token = jwt.sign(
+      { sub: String(admin.id), email: admin.email, roles, tenants: (tenants||[]).map(t=>String(t.id)) },
+      process.env.AUTH_JWT_SECRET,
+      { expiresIn: '1h' }
+    );
     // Popup-Flow: Token via postMessage an opener zurückgeben
     if (state && state.mode === 'popup') {
       const safeOrigin = typeof state.origin === 'string' && state.origin.startsWith('http')
@@ -296,6 +307,39 @@ router.get('/tenants', async (req, res) => {
   }
 });
 
+// Allowlist verwalten (nur Super‑Admin)
+router.get('/allowed-admins', async (req, res) => {
+  try {
+    const auth = req.headers.authorization || '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
+    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
+    const isSuper = Array.isArray(payload.roles) && payload.roles.includes('super');
+    if (!isSuper) return res.status(403).json({ success:false, message:'forbidden' });
+    const r = await query('SELECT id, email, tenant_id, role, created_at FROM allowed_admins ORDER BY email ASC');
+    return res.json({ success:true, data: r.rows });
+  } catch (e) {
+    return res.status(500).json({ success:false, message:'list failed' });
+  }
+});
+
+router.post('/allowed-admins', async (req, res) => {
+  try {
+    const auth = req.headers.authorization || '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
+    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
+    const isSuper = Array.isArray(payload.roles) && payload.roles.includes('super');
+    if (!isSuper) return res.status(403).json({ success:false, message:'forbidden' });
+    const { email, tenant_id, role } = req.body || {};
+    if (!email) return res.status(400).json({ success:false, message:'email required' });
+    await query('INSERT INTO allowed_admins (email, tenant_id, role) VALUES ($1,$2,$3) ON CONFLICT (email) DO UPDATE SET tenant_id=EXCLUDED.tenant_id, role=EXCLUDED.role', [email, tenant_id || null, role || 'admin']);
+    return res.json({ success:true });
+  } catch (e) {
+    return res.status(500).json({ success:false, message:'upsert failed' });
+  }
+});
+
 // Tenant löschen (nur wenn keine weiteren Daten vorhanden sind)
 router.delete('/tenants/:id', async (req, res) => {
   try {
@@ -306,9 +350,12 @@ router.delete('/tenants/:id', async (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (!id) return res.status(400).json({ success:false, message:'invalid id' });
 
-    // Prüfen: gehört der Admin zum Tenant?
-    const rel = await query('SELECT 1 FROM tenant_admins WHERE tenant_id=$1 AND admin_id=$2', [id, payload.sub]);
-    if (rel.rowCount === 0) return res.status(403).json({ success:false, message:'forbidden' });
+    // Prüfen: Super-Admin darf alles, sonst nur zugeordnete Tenants
+    const isSuper = Array.isArray(payload.roles) && payload.roles.includes('super');
+    if (!isSuper) {
+      const rel = await query('SELECT 1 FROM tenant_admins WHERE tenant_id=$1 AND admin_id=$2', [id, payload.sub]);
+      if (rel.rowCount === 0) return res.status(403).json({ success:false, message:'forbidden' });
+    }
 
     // Nutzungsprüfung: existieren Lizenzen? (später: Events/Orders)
     const lic = await query('SELECT 1 FROM licenses WHERE tenant_id=$1 LIMIT 1', [id]);

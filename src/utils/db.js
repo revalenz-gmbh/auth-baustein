@@ -71,6 +71,17 @@ export async function initSchema() {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
+
+    // Allowlist für Admin-E-Mails
+    await query(`
+      CREATE TABLE IF NOT EXISTS allowed_admins (
+        id SERIAL PRIMARY KEY,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE SET NULL,
+        role VARCHAR(32) DEFAULT 'admin',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
   } catch (e) {
     console.error('Schema init failed', e);
   }
