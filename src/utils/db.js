@@ -112,16 +112,16 @@ export async function initSchema() {
         id SERIAL PRIMARY KEY,
         product_key VARCHAR(64) NOT NULL REFERENCES products(key) ON DELETE RESTRICT,
         owner_admin_id INTEGER NOT NULL REFERENCES admins(id) ON DELETE CASCADE,
-        tenant_id INTEGER NULL REFERENCES tenants(id) ON DELETE SET NULL,
+        tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         name VARCHAR(255) NOT NULL,
         is_active BOOLEAN NOT NULL DEFAULT TRUE,
         meta JSONB,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE (owner_admin_id, product_key, name)
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
     await query(`CREATE INDEX IF NOT EXISTS idx_product_instances_owner ON product_instances(owner_admin_id);`);
     await query(`CREATE INDEX IF NOT EXISTS idx_product_instances_tenant ON product_instances(tenant_id);`);
+    await query(`CREATE UNIQUE INDEX IF NOT EXISTS product_instances_tenant_unique ON product_instances(tenant_id, product_key, name);`);
 
     // Produktlizenzen pro Mitglied und Organisation
     await query(`

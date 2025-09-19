@@ -381,14 +381,14 @@ router.post('/products/instances', async (req, res) => {
     if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
     const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
     const { product, name, tenant_id, meta } = req.body || {};
-    if (!product || !name) return res.status(400).json({ success:false, message:'product and name required' });
+    if (!product || !name || !tenant_id) return res.status(400).json({ success:false, message:'product, name and tenant_id required' });
     const ins = await query(
       `INSERT INTO product_instances (product_key, owner_admin_id, tenant_id, name, meta)
        VALUES ($1,$2,$3,$4,$5::jsonb)
-       ON CONFLICT (owner_admin_id, product_key, name)
+       ON CONFLICT (tenant_id, product_key, name)
        DO NOTHING
        RETURNING id`,
-      [String(product), parseInt(payload.sub,10), tenant_id || null, name, meta ? JSON.stringify(meta) : null]
+      [String(product), parseInt(payload.sub,10), tenant_id, name, meta ? JSON.stringify(meta) : null]
     );
     if (ins.rowCount === 0) return res.status(409).json({ success:false, message:'instance exists' });
     return res.status(201).json({ success:true, data:{ id: ins.rows[0].id } });
