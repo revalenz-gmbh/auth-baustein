@@ -73,6 +73,14 @@
     <button onclick="loadProducts()">Produkte laden</button>
   </div>
   <ul id="products"></ul>
+  <div id="products_admin" style="display:none; margin-top:12px;">
+    <div class="row">
+      <input id="prod_key" placeholder="Produkt-Key (z.B. tickets)" style="width:180px" />
+      <input id="prod_name" placeholder="Produkt-Name" />
+      <label class="muted"><input type="checkbox" id="prod_active" checked /> aktiv</label>
+      <button onclick="createProduct()">Produkt anlegen</button>
+    </div>
+  </div>
 
   <h2>Eigene Produkt‑Instanzen</h2>
   <div class="row">
@@ -108,12 +116,14 @@
       const el = document.getElementById('auth');
       el.textContent = t ? 'Angemeldet' : 'Nicht angemeldet';
       el.className = t ? 'success' : 'muted';
-      // Rolle anzeigen
       try {
         if (t){
           const payload = JSON.parse(atob(t.split('.')[1]));
           const r = document.getElementById('role');
-          r.textContent = (payload.roles||[]).includes('super') ? '(Super‑Admin)' : '';
+          const isSuper = Array.isArray(payload.roles) && payload.roles.includes('super');
+          r.textContent = isSuper ? '(Super‑Admin)' : '';
+          const pa = document.getElementById('products_admin');
+          if (pa) pa.style.display = isSuper ? '' : 'none';
         }
       } catch(_){ }
     }
@@ -406,9 +416,29 @@
           li.textContent = `${p.name} (${p.key})`;
           ul.appendChild(li);
         });
-        // Standard: 'tickets' vorauswählen, falls vorhanden
-        try { sel.value = items.find(x=>x.key==='tickets') ? 'tickets' : (items[0]?.key||''); } catch(_){}
-      } catch(_){}
+        try { sel.value = items.find(x=>x.key==='tickets') ? 'tickets' : (items[0]?.key||''); } catch(_){ }
+      } catch(_){ }
+    }
+
+    async function createProduct(){
+      const t = getToken(); if (!t){ showMsg('Bitte einloggen', false); return; }
+      const key = (document.getElementById('prod_key')?.value||'').trim();
+      const name = (document.getElementById('prod_name')?.value||'').trim();
+      const is_active = !!document.getElementById('prod_active')?.checked;
+      if (!key || !name){ showMsg('Produkt-Key und Name erforderlich', false); return; }
+      try {
+        const res = await fetch(`${AUTH_BASE}/auth/products`, {
+          method:'POST', headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${t}` },
+          body: JSON.stringify({ key, name, is_active })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.message||`HTTP ${res.status}`);
+        showMsg('Produkt angelegt/aktualisiert', true);
+        document.getElementById('prod_key').value='';
+        document.getElementById('prod_name').value='';
+        document.getElementById('prod_active').checked=true;
+        await loadProducts();
+      } catch(e){ showMsg(e.message, false); }
     }
 
     async function loadInstances(){
