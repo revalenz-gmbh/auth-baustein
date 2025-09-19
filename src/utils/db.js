@@ -123,6 +123,18 @@ export async function initSchema() {
     await query(`CREATE INDEX IF NOT EXISTS idx_entitlements_admin   ON entitlements(admin_id);`);
     await query(`CREATE INDEX IF NOT EXISTS idx_entitlements_tenant  ON entitlements(tenant_id);`);
     await query(`CREATE INDEX IF NOT EXISTS idx_entitlements_product ON entitlements(product_key);`);
+
+    // Für ON CONFLICT Targets: eindeutige (teil-)Indizes
+    await query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS entitlements_org_unique
+      ON entitlements(tenant_id, product_key)
+      WHERE admin_id IS NULL;
+    `);
+    await query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS entitlements_member_unique
+      ON entitlements(tenant_id, admin_id, product_key)
+      WHERE admin_id IS NOT NULL;
+    `);
   } catch (e) {
     console.error('Schema init failed', e);
   }
