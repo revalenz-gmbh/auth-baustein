@@ -106,6 +106,23 @@ export async function initSchema() {
       ON CONFLICT (key) DO NOTHING;
     `);
 
+    // Produkt-Instanzen (Benutzer-eigene Produkte)
+    await query(`
+      CREATE TABLE IF NOT EXISTS product_instances (
+        id SERIAL PRIMARY KEY,
+        product_key VARCHAR(64) NOT NULL REFERENCES products(key) ON DELETE RESTRICT,
+        owner_admin_id INTEGER NOT NULL REFERENCES admins(id) ON DELETE CASCADE,
+        tenant_id INTEGER NULL REFERENCES tenants(id) ON DELETE SET NULL,
+        name VARCHAR(255) NOT NULL,
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        meta JSONB,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (owner_admin_id, product_key, name)
+      );
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_product_instances_owner ON product_instances(owner_admin_id);`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_product_instances_tenant ON product_instances(tenant_id);`);
+
     // Produktlizenzen pro Mitglied und Organisation
     await query(`
       CREATE TABLE IF NOT EXISTS member_product_licenses (
@@ -132,6 +149,7 @@ export async function initSchema() {
         status      VARCHAR(32) NOT NULL DEFAULT 'active',
         valid_until TIMESTAMP NULL,
         meta        JSONB,
+        product_instance_id INTEGER NULL REFERENCES product_instances(id) ON DELETE CASCADE,
         created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
@@ -162,6 +180,31 @@ export async function initSchema() {
           ALTER TABLE entitlements
           ADD CONSTRAINT entitlements_member_unique_constraint
           UNIQUE (tenant_id, admin_id, product_key);
+        END IF;
+      END $$;
+    `);
+
+    // Eindeutigkeit für Instanz-Lizenzen
+    await query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS entitlements_instance_unique
+      ON entitlements(product_instance_id, admin_id)
+      WHERE product_instance_id IS NOT NULL;
+    `);
+
+    // Scope: Entweder Org-Plan (tenant+product_key) ODER Instanz-Lizenz (instance+admin)
+    await query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint WHERE conname = 'entitlements_scope_check'
+        ) THEN
+          ALTER TABLE entitlements
+          ADD CONSTRAINT entitlements_scope_check CHECK (
+            (
+              product_instance_id IS NULL AND product_key IS NOT NULL AND tenant_id IS NOT NULL
+            ) OR (
+              product_instance_id IS NOT NULL AND admin_id IS NOT NULL
+            )
+          );
         END IF;
       END $$;
     `);

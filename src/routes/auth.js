@@ -357,6 +357,104 @@ router.post('/products', async (req, res) => {
   }
 });
 
+// Produkt-Instanzen
+router.get('/products/instances', async (req, res) => {
+  try {
+    const auth = req.headers.authorization || '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
+    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
+    const owner = String(req.query.owner||'');
+    const ownerId = owner === 'me' ? parseInt(payload.sub, 10) : parseInt(req.query.owner_id||'0',10);
+    if (!ownerId) return res.status(400).json({ success:false, message:'owner required' });
+    const r = await query('SELECT id, product_key, name, tenant_id, is_active, created_at FROM product_instances WHERE owner_admin_id=$1 ORDER BY created_at DESC', [ownerId]);
+    return res.json({ success:true, data: r.rows });
+  } catch (e) {
+    return res.status(500).json({ success:false, message:'list instances failed' });
+  }
+});
+
+router.post('/products/instances', async (req, res) => {
+  try {
+    const auth = req.headers.authorization || '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
+    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
+    const { product, name, tenant_id, meta } = req.body || {};
+    if (!product || !name) return res.status(400).json({ success:false, message:'product and name required' });
+    const ins = await query(
+      `INSERT INTO product_instances (product_key, owner_admin_id, tenant_id, name, meta)
+       VALUES ($1,$2,$3,$4,$5::jsonb)
+       ON CONFLICT (owner_admin_id, product_key, name)
+       DO NOTHING
+       RETURNING id`,
+      [String(product), parseInt(payload.sub,10), tenant_id || null, name, meta ? JSON.stringify(meta) : null]
+    );
+    if (ins.rowCount === 0) return res.status(409).json({ success:false, message:'instance exists' });
+    return res.status(201).json({ success:true, data:{ id: ins.rows[0].id } });
+  } catch (e) {
+    return res.status(500).json({ success:false, message:'create instance failed' });
+  }
+});
+
+router.get('/products/instances/:id/licenses', async (req, res) => {
+  try {
+    const auth = req.headers.authorization || '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
+    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
+    const id = parseInt(req.params.id, 10);
+    const ownerCheck = await query('SELECT 1 FROM product_instances WHERE id=$1 AND owner_admin_id=$2', [id, payload.sub]);
+    if (ownerCheck.rowCount === 0) return res.status(403).json({ success:false, message:'forbidden' });
+    const r = await query('SELECT e.id, e.admin_id, a.email, a.first_name, a.last_name, e.status, e.valid_until FROM entitlements e JOIN admins a ON a.id=e.admin_id WHERE e.product_instance_id=$1 ORDER BY a.email', [id]);
+    return res.json({ success:true, data: r.rows });
+  } catch (e) {
+    return res.status(500).json({ success:false, message:'list instance licenses failed' });
+  }
+});
+
+router.post('/products/instances/:id/licenses', async (req, res) => {
+  try {
+    const auth = req.headers.authorization || '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
+    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
+    const id = parseInt(req.params.id, 10);
+    const { admin_id, status='active' } = req.body || {};
+    if (!admin_id) return res.status(400).json({ success:false, message:'admin_id required' });
+    const ownerCheck = await query('SELECT 1 FROM product_instances WHERE id=$1 AND owner_admin_id=$2', [id, payload.sub]);
+    if (ownerCheck.rowCount === 0) return res.status(403).json({ success:false, message:'forbidden' });
+    await query(
+      `INSERT INTO entitlements (product_instance_id, admin_id, status, product_key)
+       VALUES ($1,$2,$3,'custom')
+       ON CONFLICT (product_instance_id, admin_id)
+       DO UPDATE SET status=EXCLUDED.status`,
+      [id, admin_id, status]
+    );
+    return res.status(201).json({ success:true });
+  } catch (e) {
+    return res.status(500).json({ success:false, message:'assign instance license failed' });
+  }
+});
+
+router.delete('/products/instances/:id/licenses', async (req, res) => {
+  try {
+    const auth = req.headers.authorization || '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
+    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
+    const id = parseInt(req.params.id, 10);
+    const adminId = parseInt(req.query.admin_id||'0',10);
+    if (!adminId) return res.status(400).json({ success:false, message:'admin_id required' });
+    const ownerCheck = await query('SELECT 1 FROM product_instances WHERE id=$1 AND owner_admin_id=$2', [id, payload.sub]);
+    if (ownerCheck.rowCount === 0) return res.status(403).json({ success:false, message:'forbidden' });
+    await query('DELETE FROM entitlements WHERE product_instance_id=$1 AND admin_id=$2', [id, adminId]);
+    return res.json({ success:true });
+  } catch (e) {
+    return res.status(500).json({ success:false, message:'revoke instance license failed' });
+  }
+});
+
 router.post('/allowed-admins', async (req, res) => {
   try {
     const auth = req.headers.authorization || '';

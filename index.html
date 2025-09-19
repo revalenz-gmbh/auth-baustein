@@ -74,6 +74,16 @@
   </div>
   <ul id="products"></ul>
 
+  <h2>Eigene Produkt‑Instanzen</h2>
+  <div class="row">
+    <input id="pi_product" placeholder="Produkt-Key (z.B. tickets)" style="width:160px" />
+    <input id="pi_name" placeholder="Instanz‑Name" />
+    <input id="pi_tenant" placeholder="(optional) Tenant-ID" style="width:160px" />
+    <button onclick="createInstance()">Instanz anlegen</button>
+    <button onclick="loadInstances()">Instanzen laden</button>
+  </div>
+  <ul id="instances"></ul>
+
   <h2>Whitelist (Super‑Admin)</h2>
   <div class="row">
     <input id="wl_email" placeholder="E-Mail" />
@@ -399,6 +409,72 @@
         // Standard: 'tickets' vorauswählen, falls vorhanden
         try { sel.value = items.find(x=>x.key==='tickets') ? 'tickets' : (items[0]?.key||''); } catch(_){}
       } catch(_){}
+    }
+
+    async function loadInstances(){
+      const t = getToken(); if (!t){ showMsg('Bitte einloggen', false); return; }
+      try {
+        const res = await fetch(`${AUTH_BASE}/auth/products/instances?owner=me`, { headers:{ Authorization:`Bearer ${t}` }});
+        const data = await res.json();
+        const ul = document.getElementById('instances'); ul.innerHTML='';
+        if (!res.ok || !data.success) throw new Error(data.message||`HTTP ${res.status}`);
+        (data.data||[]).forEach(inst => {
+          const li = document.createElement('li');
+          li.textContent = `${inst.name} (${inst.product_key})`;
+          const manageBtn = document.createElement('button');
+          manageBtn.textContent = 'Lizenzen';
+          manageBtn.style.marginLeft='8px';
+          manageBtn.onclick = () => manageInstanceLicenses(inst.id);
+          ul.appendChild(li);
+          ul.appendChild(manageBtn);
+        });
+        showMsg(`${(data.data||[]).length} Instanzen geladen`, true);
+      } catch(e){ showMsg(e.message, false); }
+    }
+
+    async function createInstance(){
+      const t = getToken(); if (!t){ showMsg('Bitte einloggen', false); return; }
+      const product = (document.getElementById('pi_product')?.value||'').trim();
+      const name = (document.getElementById('pi_name')?.value||'').trim();
+      const tenant_id = parseInt(document.getElementById('pi_tenant')?.value||'') || null;
+      if (!product || !name) { showMsg('Produkt-Key und Name erforderlich', false); return; }
+      try {
+        const res = await fetch(`${AUTH_BASE}/auth/products/instances`, {
+          method:'POST', headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${t}` },
+          body: JSON.stringify({ product, name, tenant_id })
+        });
+        const data = await res.json();
+        if (res.status === 409) { showMsg('Instanz existiert bereits', false); return; }
+        if (!res.ok || !data.success) throw new Error(data.message||`HTTP ${res.status}`);
+        showMsg('Instanz angelegt', true);
+        await loadInstances();
+      } catch(e){ showMsg(e.message, false); }
+    }
+
+    async function manageInstanceLicenses(instanceId){
+      const t = getToken(); if (!t){ showMsg('Bitte einloggen', false); return; }
+      try {
+        const res = await fetch(`${AUTH_BASE}/auth/products/instances/${instanceId}/licenses`, { headers:{ Authorization:`Bearer ${t}` }});
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.message||`HTTP ${res.status}`);
+        const members = (data.data||[]).map(m => `${m.first_name||''} ${m.last_name||''} <${m.email}>`).join('\n') || '(keine)';
+        const action = prompt(`Lizenzen:\n${members}\n\nAktion: 'add <admin_id>' oder 'del <admin_id>'`);
+        if (!action) return;
+        const [cmd, idStr] = action.trim().split(/\s+/);
+        const admin_id = parseInt(idStr||'0',10);
+        if (!admin_id) { showMsg('admin_id erforderlich', false); return; }
+        if (cmd === 'add') {
+          const r = await fetch(`${AUTH_BASE}/auth/products/instances/${instanceId}/licenses`, { method:'POST', headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${t}` }, body: JSON.stringify({ admin_id, status:'active' }) });
+          const dj = await r.json(); if (!r.ok || !dj.success) throw new Error(dj.message||`HTTP ${r.status}`);
+          showMsg('Lizenz zugewiesen', true);
+        } else if (cmd === 'del') {
+          const r = await fetch(`${AUTH_BASE}/auth/products/instances/${instanceId}/licenses?admin_id=${admin_id}`, { method:'DELETE', headers:{ Authorization:`Bearer ${t}` }});
+          const dj = await r.json().catch(()=>({success:true})); if (!r.ok || dj.success === false) throw new Error(dj.message||`HTTP ${r.status}`);
+          showMsg('Lizenz entzogen', true);
+        } else {
+          showMsg('Unbekannte Aktion', false);
+        }
+      } catch(e){ showMsg(e.message, false); }
     }
 
     window.addEventListener('DOMContentLoaded', () => {
