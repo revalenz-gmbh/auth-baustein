@@ -460,9 +460,10 @@ router.post('/tenants/:tenantId/members', async (req, res) => {
     const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
     const tenantId = parseInt(req.params.tenantId, 10);
     if (!tenantId) return res.status(400).json({ success:false, message:'invalid tenantId' });
-    const { email, role } = req.body || {};
+    const { email, role, first_name, last_name } = req.body || {};
     const normEmail = (email||'').trim().toLowerCase();
     if (!normEmail) return res.status(400).json({ success:false, message:'email required' });
+    if (!first_name || !last_name) return res.status(400).json({ success:false, message:'first_name and last_name required' });
     const desiredRole = (role||'admin').toLowerCase();
 
     // Berechtigung prüfen
@@ -479,10 +480,10 @@ router.post('/tenants/:tenantId/members', async (req, res) => {
     const existing = await query('SELECT id FROM admins WHERE LOWER(email)=LOWER($1)', [normEmail]);
     if (existing.rowCount > 0) {
       adminId = existing.rows[0].id;
+      await query('UPDATE admins SET name=$1, first_name=$2, last_name=$3 WHERE id=$4', [`${first_name} ${last_name}`.trim(), first_name, last_name, adminId]);
     } else {
-      const ins = await query('INSERT INTO admins (email, name) VALUES ($1,$2) RETURNING id', [normEmail, normEmail]);
+      const ins = await query('INSERT INTO admins (email, name, first_name, last_name) VALUES ($1,$2,$3,$4) RETURNING id', [normEmail, `${first_name} ${last_name}`.trim(), first_name, last_name]);
       adminId = ins.rows[0].id;
-      // In Allowlist aufnehmen (optional, falls Domain-Restriktion aktiv ist)
       try { await query('INSERT INTO allowed_admins (email) VALUES ($1) ON CONFLICT (email) DO NOTHING', [normEmail]); } catch(_){ }
     }
 

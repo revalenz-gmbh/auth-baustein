@@ -30,6 +30,8 @@ export async function initSchema() {
     // Zusätzliche Spalten/Indizes für OAuth
     await query(`ALTER TABLE admins ADD COLUMN IF NOT EXISTS provider VARCHAR(64);`);
     await query(`ALTER TABLE admins ADD COLUMN IF NOT EXISTS provider_id VARCHAR(255);`);
+    await query(`ALTER TABLE admins ADD COLUMN IF NOT EXISTS first_name VARCHAR(255);`);
+    await query(`ALTER TABLE admins ADD COLUMN IF NOT EXISTS last_name VARCHAR(255);`);
     await query(`CREATE INDEX IF NOT EXISTS idx_admins_email ON admins(email);`);
     await query(`CREATE INDEX IF NOT EXISTS idx_admins_provider ON admins(provider, provider_id);`);
     await query(`

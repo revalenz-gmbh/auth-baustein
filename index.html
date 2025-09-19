@@ -51,6 +51,8 @@
   <div class="row">
     <input id="mem_tenant_id" placeholder="Tenant-ID" style="width:120px" />
     <input id="mem_email" placeholder="E-Mail" />
+    <input id="mem_first_name" placeholder="Vorname" style="width:140px" />
+    <input id="mem_last_name" placeholder="Nachname" style="width:160px" />
     <select id="mem_role">
       <option value="admin">admin</option>
       <option value="owner">owner</option>
@@ -217,12 +219,14 @@
       const t = getToken(); if (!t){ showMsg('Bitte einloggen', false); return; }
       const tenantId = parseInt(document.getElementById('mem_tenant_id')?.value||'');
       const email = (document.getElementById('mem_email')?.value||'').trim();
+      const first_name = (document.getElementById('mem_first_name')?.value||'').trim();
+      const last_name = (document.getElementById('mem_last_name')?.value||'').trim();
       const role = (document.getElementById('mem_role')?.value||'admin');
-      if (!tenantId || !email) { showMsg('Tenant-ID und E-Mail erforderlich', false); return; }
+      if (!tenantId || !email || !first_name || !last_name) { showMsg('Tenant-ID, E-Mail, Vor- und Nachname erforderlich', false); return; }
       try {
         const res = await fetch(`${AUTH_BASE}/auth/tenants/${tenantId}/members`, {
           method: 'POST', headers: { 'Content-Type':'application/json', Authorization: `Bearer ${t}` },
-          body: JSON.stringify({ email, role })
+          body: JSON.stringify({ email, role, first_name, last_name })
         });
         const data = await res.json();
         if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`);
