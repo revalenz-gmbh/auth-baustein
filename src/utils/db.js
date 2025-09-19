@@ -135,6 +135,21 @@ export async function initSchema() {
       ON entitlements(tenant_id, admin_id, product_key)
       WHERE admin_id IS NOT NULL;
     `);
+
+    // Zusätzlich echte UNIQUE-Constraint für (tenant_id, admin_id, product_key)
+    // nötig, damit ON CONFLICT (tenant_id, admin_id, product_key) greift
+    await query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE conrelid = 'entitlements'::regclass AND conname = 'entitlements_member_unique_constraint'
+        ) THEN
+          ALTER TABLE entitlements
+          ADD CONSTRAINT entitlements_member_unique_constraint
+          UNIQUE (tenant_id, admin_id, product_key);
+        END IF;
+      END $$;
+    `);
   } catch (e) {
     console.error('Schema init failed', e);
   }

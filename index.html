@@ -254,6 +254,10 @@
         if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`);
         showMsg('Mitglied hinzugefügt', true);
         await loadMembers();
+        // Felder leeren
+        document.getElementById('mem_email').value='';
+        document.getElementById('mem_first_name').value='';
+        document.getElementById('mem_last_name').value='';
       } catch(e){ showMsg(e.message, false); }
     }
 
