@@ -105,6 +105,24 @@ export async function initSchema() {
         UNIQUE (tenant_id, admin_id, product_key)
       );
     `);
+
+    // Vereinheitlichte Lizenztabelle (Org- und Member-Ebene)
+    await query(`
+      CREATE TABLE IF NOT EXISTS entitlements (
+        id SERIAL PRIMARY KEY,
+        tenant_id   INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        admin_id    INTEGER     NULL REFERENCES admins(id) ON DELETE CASCADE,
+        product_key VARCHAR(64) NOT NULL,
+        plan        VARCHAR(64),
+        status      VARCHAR(32) NOT NULL DEFAULT 'active',
+        valid_until TIMESTAMP NULL,
+        meta        JSONB,
+        created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_entitlements_admin   ON entitlements(admin_id);`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_entitlements_tenant  ON entitlements(tenant_id);`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_entitlements_product ON entitlements(product_key);`);
   } catch (e) {
     console.error('Schema init failed', e);
   }

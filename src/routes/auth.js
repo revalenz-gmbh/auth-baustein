@@ -497,9 +497,10 @@ router.post('/tenants/:tenantId/members', async (req, res) => {
     );
     if (product_key && ['tickets','impulse'].includes(String(product_key))) {
       await query(
-        `INSERT INTO member_product_licenses (tenant_id, admin_id, product_key, status)
+        `INSERT INTO entitlements (tenant_id, admin_id, product_key, status)
          VALUES ($1,$2,$3,'active')
-         ON CONFLICT (tenant_id, admin_id, product_key) DO UPDATE SET status='active'`,
+         ON CONFLICT (tenant_id, admin_id, product_key)
+         DO UPDATE SET status='active'`,
         [tenantId, adminId, String(product_key)]
       );
     }
@@ -585,18 +586,16 @@ router.post('/tenants/:tenantId/licenses', async (req, res) => {
       if (!['owner','admin'].includes(role)) return res.status(403).json({ success:false, message:'forbidden' });
     }
 
-    const upd = await query(
-      `UPDATE tenants
-       SET license_plan = $1,
-           license_status = COALESCE($2, 'active'),
-           license_valid_until = $3::timestamp,
-           license_meta = $4::jsonb
-       WHERE id=$5
-       RETURNING id, name, license_plan, license_status, license_valid_until, license_meta`,
-      [plan, status || 'active', valid_until || null, meta ? JSON.stringify(meta) : null, tenantId]
+    // Künftig über entitlements (org-weite Lizenz: admin_id NULL, product=tickets)
+    const upsert = await query(
+      `INSERT INTO entitlements (tenant_id, admin_id, product_key, plan, status, valid_until, meta)
+       VALUES ($1, NULL, 'tickets', $2, COALESCE($3,'active'), $4::timestamp, $5::jsonb)
+       ON CONFLICT (tenant_id, product_key) WHERE admin_id IS NULL
+       DO UPDATE SET plan=EXCLUDED.plan, status=EXCLUDED.status, valid_until=EXCLUDED.valid_until, meta=EXCLUDED.meta
+       RETURNING id`,
+      [tenantId, plan, status || 'active', valid_until || null, meta ? JSON.stringify(meta) : null]
     );
-    if (upd.rowCount === 0) return res.status(404).json({ success:false, message:'tenant not found' });
-    return res.json({ success:true, data: upd.rows[0] });
+    return res.json({ success:true, data: { entitlement_id: upsert.rows[0].id } });
   } catch (e) {
     console.error('upsert license error', e);
     return res.status(500).json({ success:false, message:'upsert license failed' });
@@ -615,11 +614,11 @@ router.delete('/tenants/:tenantId/licenses/:id', async (req, res) => {
     const tenantId = parseInt(req.params.tenantId, 10);
     if (!tenantId) return res.status(400).json({ success:false, message:'invalid ids' });
     const upd = await query(
-      `UPDATE tenants SET license_status='inactive' WHERE id=$1 RETURNING id, name, license_status`,
+      `UPDATE entitlements SET status='inactive' WHERE tenant_id=$1 AND admin_id IS NULL AND product_key='tickets' RETURNING id`,
       [tenantId]
     );
-    if (upd.rowCount === 0) return res.status(404).json({ success:false, message:'tenant not found' });
-    return res.json({ success:true, message:'license set inactive', data: upd.rows[0] });
+    if (upd.rowCount === 0) return res.status(404).json({ success:false, message:'org entitlement not found' });
+    return res.json({ success:true, message:'license set inactive' });
   } catch (e) {
     return res.status(500).json({ success:false, message:'delete license failed' });
   }
