@@ -623,3 +623,60 @@ router.delete('/tenants/:tenantId/licenses/:id', async (req, res) => {
     return res.status(500).json({ success:false, message:'delete license failed' });
   }
 });
+
+// --- Entitlements lesen ---
+// Org-weiter Plan je Produkt (admin_id IS NULL)
+router.get('/tenants/:tenantId/entitlements/org', async (req, res) => {
+  try {
+    const auth = req.headers.authorization || '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
+    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
+    const tenantId = parseInt(req.params.tenantId, 10);
+    if (!tenantId) return res.status(400).json({ success:false, message:'invalid tenantId' });
+    const product = String(req.query.product || 'tickets');
+    const isSuper = Array.isArray(payload.roles) && payload.roles.includes('super');
+    if (!isSuper) {
+      const rel = await query('SELECT 1 FROM tenant_admins WHERE tenant_id=$1 AND admin_id=$2', [tenantId, payload.sub]);
+      if (rel.rowCount === 0) return res.status(403).json({ success:false, message:'forbidden' });
+    }
+    const r = await query(
+      `SELECT id, tenant_id, product_key, plan, status, valid_until, meta, created_at
+       FROM entitlements
+       WHERE tenant_id=$1 AND admin_id IS NULL AND product_key=$2`,
+      [tenantId, product]
+    );
+    return res.json({ success:true, data: r.rows });
+  } catch (e) {
+    return res.status(500).json({ success:false, message:'read org entitlements failed' });
+  }
+});
+
+// Member-Services eines Admins in einer Org
+router.get('/tenants/:tenantId/entitlements/members/:adminId', async (req, res) => {
+  try {
+    const auth = req.headers.authorization || '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
+    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
+    const tenantId = parseInt(req.params.tenantId, 10);
+    const adminId = parseInt(req.params.adminId, 10);
+    if (!tenantId || !adminId) return res.status(400).json({ success:false, message:'invalid params' });
+    const isSuper = Array.isArray(payload.roles) && payload.roles.includes('super');
+    if (!isSuper) {
+      const rel = await query('SELECT 1 FROM tenant_admins WHERE tenant_id=$1 AND admin_id=$2', [tenantId, payload.sub]);
+      if (rel.rowCount === 0) return res.status(403).json({ success:false, message:'forbidden' });
+    }
+    const product = req.query.product ? String(req.query.product) : null;
+    const sql = product
+      ? `SELECT id, tenant_id, admin_id, product_key, status, valid_until, meta, created_at
+         FROM entitlements WHERE tenant_id=$1 AND admin_id=$2 AND product_key=$3`
+      : `SELECT id, tenant_id, admin_id, product_key, status, valid_until, meta, created_at
+         FROM entitlements WHERE tenant_id=$1 AND admin_id=$2`;
+    const params = product ? [tenantId, adminId, product] : [tenantId, adminId];
+    const r = await query(sql, params);
+    return res.json({ success:true, data: r.rows });
+  } catch (e) {
+    return res.status(500).json({ success:false, message:'read member entitlements failed' });
+  }
+});

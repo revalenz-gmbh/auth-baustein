@@ -210,13 +210,25 @@
         const data = await res.json();
         if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`);
         const ul = document.getElementById('members'); ul.innerHTML='';
-        (data.data||[]).forEach(m => {
+        (data.data||[]).forEach(async (m) => {
           const li = document.createElement('li');
           const delBtn = document.createElement('button');
           delBtn.textContent = 'Entfernen';
           delBtn.style.marginLeft='8px';
           delBtn.onclick = () => removeMember(tenantId, m.email);
           li.textContent = `${m.first_name||''} ${m.last_name||''} – ${m.email} (${m.role})`;
+          // Services laden
+          try {
+            const svcRes = await fetch(`${AUTH_BASE}/auth/tenants/${tenantId}/entitlements/members/${m.admin_id}`, { headers: { Authorization: `Bearer ${t}` }});
+            const svc = await svcRes.json();
+            if (svcRes.ok && svc.success) {
+              const tag = document.createElement('span');
+              tag.className = 'muted';
+              const list = (svc.data||[]).map(s => s.product_key + (s.status==='active'?'':'(inactive)')).join(', ');
+              tag.textContent = list ? ` – Services: ${list}` : '';
+              li.appendChild(tag);
+            }
+          } catch(_){}
           li.appendChild(delBtn);
           ul.appendChild(li);
         });
