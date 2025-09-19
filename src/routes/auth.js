@@ -465,6 +465,7 @@ router.post('/tenants/:tenantId/members', async (req, res) => {
     if (!normEmail) return res.status(400).json({ success:false, message:'email required' });
     if (!first_name || !last_name) return res.status(400).json({ success:false, message:'first_name and last_name required' });
     const desiredRole = (role||'admin').toLowerCase();
+    if (!['user','admin','owner'].includes(desiredRole)) return res.status(400).json({ success:false, message:'invalid role' });
 
     // Berechtigung prüfen
     const isSuper = Array.isArray(payload.roles) && payload.roles.includes('super');
