@@ -506,7 +506,8 @@ router.post('/tenants/:tenantId/members', async (req, res) => {
     }
     return res.status(201).json({ success:true });
   } catch (e) {
-    return res.status(500).json({ success:false, message:'add member failed' });
+    console.error('add member failed', e);
+    return res.status(500).json({ success:false, message: e?.message || 'add member failed' });
   }
 });
 
