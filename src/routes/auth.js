@@ -658,6 +658,91 @@ router.get('/tenants/:tenantId/entitlements/org', async (req, res) => {
   }
 });
 
+// Org-Plan schreiben (product, plan, status, valid_until)
+router.post('/tenants/:tenantId/entitlements/org', async (req, res) => {
+  try {
+    const auth = req.headers.authorization || '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
+    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
+    const tenantId = parseInt(req.params.tenantId, 10);
+    if (!tenantId) return res.status(400).json({ success:false, message:'invalid tenantId' });
+    const { product = 'tickets', plan, status = 'active', valid_until = null, meta = null } = req.body || {};
+    if (!plan) return res.status(400).json({ success:false, message:'plan required' });
+    const isSuper = Array.isArray(payload.roles) && payload.roles.includes('super');
+    if (!isSuper) {
+      const rel = await query('SELECT role FROM tenant_admins WHERE tenant_id=$1 AND admin_id=$2', [tenantId, payload.sub]);
+      if (rel.rowCount === 0) return res.status(403).json({ success:false, message:'forbidden' });
+    }
+    const upsert = await query(
+      `INSERT INTO entitlements (tenant_id, admin_id, product_key, plan, status, valid_until, meta)
+       VALUES ($1, NULL, $2, $3, $4, $5::timestamp, $6::jsonb)
+       ON CONFLICT (tenant_id, product_key) WHERE admin_id IS NULL
+       DO UPDATE SET plan=EXCLUDED.plan, status=EXCLUDED.status, valid_until=EXCLUDED.valid_until, meta=EXCLUDED.meta
+       RETURNING id`,
+      [tenantId, String(product), plan, status, valid_until, meta ? JSON.stringify(meta) : null]
+    );
+    return res.json({ success:true, data:{ entitlement_id: upsert.rows[0].id } });
+  } catch (e) {
+    console.error('upsert org entitlement failed', e);
+    return res.status(500).json({ success:false, message:'upsert org entitlement failed' });
+  }
+});
+
+// Member-Service zuweisen (product/status)
+router.post('/tenants/:tenantId/entitlements/members/:adminId', async (req, res) => {
+  try {
+    const auth = req.headers.authorization || '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
+    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
+    const tenantId = parseInt(req.params.tenantId, 10);
+    const adminId = parseInt(req.params.adminId, 10);
+    if (!tenantId || !adminId) return res.status(400).json({ success:false, message:'invalid params' });
+    const { product = 'tickets', status = 'active' } = req.body || {};
+    const isSuper = Array.isArray(payload.roles) && payload.roles.includes('super');
+    if (!isSuper) {
+      const rel = await query('SELECT role FROM tenant_admins WHERE tenant_id=$1 AND admin_id=$2', [tenantId, payload.sub]);
+      if (rel.rowCount === 0) return res.status(403).json({ success:false, message:'forbidden' });
+    }
+    await query(
+      `INSERT INTO entitlements (tenant_id, admin_id, product_key, status)
+       VALUES ($1,$2,$3,$4)
+       ON CONFLICT (tenant_id, admin_id, product_key)
+       DO UPDATE SET status=EXCLUDED.status`,
+      [tenantId, adminId, String(product), status]
+    );
+    return res.status(201).json({ success:true });
+  } catch (e) {
+    console.error('assign member entitlement failed', e);
+    return res.status(500).json({ success:false, message:'assign member entitlement failed' });
+  }
+});
+
+// Member-Service entziehen (per product)
+router.delete('/tenants/:tenantId/entitlements/members/:adminId', async (req, res) => {
+  try {
+    const auth = req.headers.authorization || '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
+    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
+    const tenantId = parseInt(req.params.tenantId, 10);
+    const adminId = parseInt(req.params.adminId, 10);
+    const product = String(req.query.product || 'tickets');
+    if (!tenantId || !adminId || !product) return res.status(400).json({ success:false, message:'invalid params' });
+    const isSuper = Array.isArray(payload.roles) && payload.roles.includes('super');
+    if (!isSuper) {
+      const rel = await query('SELECT role FROM tenant_admins WHERE tenant_id=$1 AND admin_id=$2', [tenantId, payload.sub]);
+      if (rel.rowCount === 0) return res.status(403).json({ success:false, message:'forbidden' });
+    }
+    await query('DELETE FROM entitlements WHERE tenant_id=$1 AND admin_id=$2 AND product_key=$3', [tenantId, adminId, product]);
+    return res.json({ success:true });
+  } catch (e) {
+    console.error('remove member entitlement failed', e);
+    return res.status(500).json({ success:false, message:'remove member entitlement failed' });
+  }
+});
+
 // Member-Services eines Admins in einer Org
 router.get('/tenants/:tenantId/entitlements/members/:adminId', async (req, res) => {
   try {
