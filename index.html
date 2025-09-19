@@ -68,6 +68,12 @@
     <select id="product_key_member"></select>
   </div>
 
+  <h2>Produkte (Registry)</h2>
+  <div class="row">
+    <button onclick="loadProducts()">Produkte laden</button>
+  </div>
+  <ul id="products"></ul>
+
   <h2>Whitelist (Super‑Admin)</h2>
   <div class="row">
     <input id="wl_email" placeholder="E-Mail" />
@@ -373,6 +379,28 @@
       } catch(e){ showMsg(e.message, false); }
     }
 
+    async function loadProducts(){
+      try {
+        const res = await fetch(`${AUTH_BASE}/auth/products`);
+        const data = await res.json();
+        const sel = document.getElementById('product_key_member');
+        const ul = document.getElementById('products');
+        sel.innerHTML = '';
+        ul.innerHTML = '';
+        const items = (data.data||[]);
+        items.forEach(p => {
+          const opt = document.createElement('option');
+          opt.value = p.key; opt.textContent = p.name;
+          sel.appendChild(opt);
+          const li = document.createElement('li');
+          li.textContent = `${p.name} (${p.key})`;
+          ul.appendChild(li);
+        });
+        // Standard: 'tickets' vorauswählen, falls vorhanden
+        try { sel.value = items.find(x=>x.key==='tickets') ? 'tickets' : (items[0]?.key||''); } catch(_){}
+      } catch(_){}
+    }
+
     window.addEventListener('DOMContentLoaded', () => {
       renderAuth();
       const fromHash = (location.hash||'').replace(/^#/, '');
@@ -381,20 +409,8 @@
       if (token){ setToken(token); try{ history.replaceState(null, document.title, location.pathname); }catch(_){} }
       // Bereits eingeloggte Nutzer: Tenants automatisch laden
       const t = getToken(); if (t) { try{ loadTenants(); }catch(_){} }
-      // Produkte laden
-      (async function(){
-        try {
-          const res = await fetch(`${AUTH_BASE}/auth/products`);
-          const data = await res.json();
-          const sel = document.getElementById('product_key_member');
-          sel.innerHTML = '';
-          (data.data||[]).forEach(p => {
-            const opt = document.createElement('option');
-            opt.value = p.key; opt.textContent = p.name;
-            sel.appendChild(opt);
-          });
-        } catch(_){}
-      })();
+      // Produkte laden (Select + Liste)
+      loadProducts();
     });
   </script>
 </body>
