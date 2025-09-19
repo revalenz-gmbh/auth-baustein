@@ -438,7 +438,7 @@ router.get('/tenants/:tenantId/members', async (req, res) => {
       if (rel.rowCount === 0) return res.status(403).json({ success:false, message:'forbidden' });
     }
     const r = await query(
-      `SELECT a.id as admin_id, a.email, ta.role
+      `SELECT a.id as admin_id, a.email, a.first_name, a.last_name, ta.role
        FROM tenant_admins ta
        JOIN admins a ON a.id = ta.admin_id
        WHERE ta.tenant_id=$1
