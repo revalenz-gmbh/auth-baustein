@@ -37,7 +37,7 @@
   </div>
   <ul id="tenants"></ul>
 
-  <h2>Mitglieder</h2>
+  <h2>Laufzeit Organisations‑Plan</h2>
   <div class="row">
     <input id="lic_tenant_id" placeholder="Tenant-ID" style="width:120px" />
     <input id="lic_plan" placeholder="Plan (z.B. basic/pro)" />
@@ -63,9 +63,9 @@
   </div>
   <ul id="members"></ul>
 
-  <h2>Produktlizenzen</h2>
   <div class="row">
-    <select id="product_key">
+    <label class="muted">Produkt für Mitglied (optional):</label>
+    <select id="product_key_member">
       <option value="tickets">Ticketservice</option>
       <option value="impulse" disabled>Impuls‑Service (bald)</option>
     </select>
@@ -231,11 +231,12 @@
       const first_name = (document.getElementById('mem_first_name')?.value||'').trim();
       const last_name = (document.getElementById('mem_last_name')?.value||'').trim();
       const role = (document.getElementById('mem_role')?.value||'admin');
+      const product_key = (document.getElementById('product_key_member')?.value||'');
       if (!tenantId || !email || !first_name || !last_name) { showMsg('Tenant-ID, E-Mail, Vor- und Nachname erforderlich', false); return; }
       try {
         const res = await fetch(`${AUTH_BASE}/auth/tenants/${tenantId}/members`, {
           method: 'POST', headers: { 'Content-Type':'application/json', Authorization: `Bearer ${t}` },
-          body: JSON.stringify({ email, role, first_name, last_name })
+          body: JSON.stringify({ email, role, first_name, last_name, product_key })
         });
         const data = await res.json();
         if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`);

@@ -451,7 +451,7 @@ router.get('/tenants/:tenantId/members', async (req, res) => {
   }
 });
 
-// Mitglied hinzufügen (nur Super oder Owner)
+// Mitglied hinzufügen (nur Super oder Owner). Optional: Produktlizenz zuweisen
 router.post('/tenants/:tenantId/members', async (req, res) => {
   try {
     const auth = req.headers.authorization || '';
@@ -460,7 +460,7 @@ router.post('/tenants/:tenantId/members', async (req, res) => {
     const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
     const tenantId = parseInt(req.params.tenantId, 10);
     if (!tenantId) return res.status(400).json({ success:false, message:'invalid tenantId' });
-    const { email, role, first_name, last_name } = req.body || {};
+    const { email, role, first_name, last_name, product_key } = req.body || {};
     const normEmail = (email||'').trim().toLowerCase();
     if (!normEmail) return res.status(400).json({ success:false, message:'email required' });
     if (!first_name || !last_name) return res.status(400).json({ success:false, message:'first_name and last_name required' });
@@ -495,6 +495,14 @@ router.post('/tenants/:tenantId/members', async (req, res) => {
        ON CONFLICT (tenant_id, admin_id) DO UPDATE SET role=EXCLUDED.role`,
       [tenantId, adminId, desiredRole]
     );
+    if (product_key && ['tickets','impulse'].includes(String(product_key))) {
+      await query(
+        `INSERT INTO member_product_licenses (tenant_id, admin_id, product_key, status)
+         VALUES ($1,$2,$3,'active')
+         ON CONFLICT (tenant_id, admin_id, product_key) DO UPDATE SET status='active'`,
+        [tenantId, adminId, String(product_key)]
+      );
+    }
     return res.status(201).json({ success:true });
   } catch (e) {
     return res.status(500).json({ success:false, message:'add member failed' });
