@@ -330,6 +330,33 @@ router.get('/allowed-admins', async (req, res) => {
   }
 });
 
+// Produkte lesen/anlegen
+router.get('/products', async (req, res) => {
+  try {
+    const r = await query('SELECT key, name, is_active FROM products WHERE is_active=TRUE ORDER BY name ASC');
+    return res.json({ success:true, data: r.rows });
+  } catch (e) {
+    return res.status(500).json({ success:false, message:'list products failed' });
+  }
+});
+
+router.post('/products', async (req, res) => {
+  try {
+    const auth = req.headers.authorization || '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
+    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
+    const isSuper = Array.isArray(payload.roles) && payload.roles.includes('super');
+    if (!isSuper) return res.status(403).json({ success:false, message:'forbidden' });
+    const { key, name, is_active = true } = req.body || {};
+    if (!key || !name) return res.status(400).json({ success:false, message:'key and name required' });
+    await query('INSERT INTO products (key, name, is_active) VALUES ($1,$2,$3) ON CONFLICT (key) DO UPDATE SET name=EXCLUDED.name, is_active=EXCLUDED.is_active', [key, name, !!is_active]);
+    return res.status(201).json({ success:true });
+  } catch (e) {
+    return res.status(500).json({ success:false, message:'upsert product failed' });
+  }
+});
+
 router.post('/allowed-admins', async (req, res) => {
   try {
     const auth = req.headers.authorization || '';

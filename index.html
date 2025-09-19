@@ -65,10 +65,7 @@
 
   <div class="row">
     <label class="muted">Produkt für Mitglied (optional):</label>
-    <select id="product_key_member">
-      <option value="tickets">Ticketservice</option>
-      <option value="impulse" disabled>Impuls‑Service (bald)</option>
-    </select>
+    <select id="product_key_member"></select>
   </div>
 
   <h2>Whitelist (Super‑Admin)</h2>
@@ -384,6 +381,20 @@
       if (token){ setToken(token); try{ history.replaceState(null, document.title, location.pathname); }catch(_){} }
       // Bereits eingeloggte Nutzer: Tenants automatisch laden
       const t = getToken(); if (t) { try{ loadTenants(); }catch(_){} }
+      // Produkte laden
+      (async function(){
+        try {
+          const res = await fetch(`${AUTH_BASE}/auth/products`);
+          const data = await res.json();
+          const sel = document.getElementById('product_key_member');
+          sel.innerHTML = '';
+          (data.data||[]).forEach(p => {
+            const opt = document.createElement('option');
+            opt.value = p.key; opt.textContent = p.name;
+            sel.appendChild(opt);
+          });
+        } catch(_){}
+      })();
     });
   </script>
 </body>

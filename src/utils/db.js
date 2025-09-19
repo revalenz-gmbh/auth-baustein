@@ -91,6 +91,21 @@ export async function initSchema() {
       );
     `);
 
+    // Produkte-Registry (zentrale Liste verfügbarer Services)
+    await query(`
+      CREATE TABLE IF NOT EXISTS products (
+        key VARCHAR(64) PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    await query(`
+      INSERT INTO products (key, name)
+      VALUES ('tickets','Ticketservice'), ('impulse','Impuls-Service')
+      ON CONFLICT (key) DO NOTHING;
+    `);
+
     // Produktlizenzen pro Mitglied und Organisation
     await query(`
       CREATE TABLE IF NOT EXISTS member_product_licenses (
