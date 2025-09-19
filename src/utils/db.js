@@ -72,6 +72,12 @@ export async function initSchema() {
       );
     `);
 
+    // Vereinfachtes Modell: Lizenzfelder direkt auf tenants ergänzen
+    await query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS license_plan VARCHAR(64);`);
+    await query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS license_status VARCHAR(32) DEFAULT 'active';`);
+    await query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS license_valid_until TIMESTAMP NULL;`);
+    await query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS license_meta JSONB;`);
+
     // Allowlist für Admin-E-Mails
     await query(`
       CREATE TABLE IF NOT EXISTS allowed_admins (

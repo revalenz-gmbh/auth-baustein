@@ -121,17 +121,16 @@
         const data = await res.json();
         if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`);
         const ul = document.getElementById('licenses'); ul.innerHTML='';
-        (data.data||[]).forEach(l => {
-          const li = document.createElement('li');
-          const delBtn = document.createElement('button');
-          delBtn.textContent = 'Löschen';
-          delBtn.style.marginLeft='8px';
-          delBtn.onclick = () => deleteLicense(tenantId, l.id);
-          li.textContent = `#${l.id} – ${l.plan} (${l.status}) bis ${l.valid_until || '-'} `;
-          li.appendChild(delBtn);
-          ul.appendChild(li);
-        });
-        showMsg(`${(data.data||[]).length} Lizenzen geladen`, true);
+        const l = data.data || {};
+        const li = document.createElement('li');
+        const delBtn = document.createElement('button');
+        delBtn.textContent = 'Deaktivieren';
+        delBtn.style.marginLeft='8px';
+        delBtn.onclick = () => deleteLicense(tenantId, 'current');
+        li.textContent = `${l.license_plan || '-'} (${l.license_status || '-'}) bis ${l.license_valid_until || '-'} `;
+        li.appendChild(delBtn);
+        ul.appendChild(li);
+        showMsg(`Lizenz geladen`, true);
       } catch(e){ showMsg(e.message, false); }
     }
 
@@ -153,11 +152,11 @@
       } catch(e){ showMsg(e.message, false); }
     }
 
-    async function deleteLicense(tenantId, id){
+    async function deleteLicense(tenantId){
       const t = getToken(); if (!t){ showMsg('Bitte einloggen', false); return; }
       if (!confirm('Lizenz wirklich löschen?')) return;
       try {
-        const res = await fetch(`${AUTH_BASE}/auth/tenants/${tenantId}/licenses/${id}`, { method:'DELETE', headers: { Authorization: `Bearer ${t}` }});
+        const res = await fetch(`${AUTH_BASE}/auth/tenants/${tenantId}/licenses/current`, { method:'DELETE', headers: { Authorization: `Bearer ${t}` }});
         const data = await res.json().catch(()=>({}));
         if (!res.ok || data.success === false) throw new Error(data.message || `HTTP ${res.status}`);
         showMsg('Lizenz gelöscht', true);
