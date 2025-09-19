@@ -382,6 +382,11 @@ router.post('/products/instances', async (req, res) => {
     const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
     const { product, name, tenant_id, meta } = req.body || {};
     if (!product || !name || !tenant_id) return res.status(400).json({ success:false, message:'product, name and tenant_id required' });
+    // Validierungen
+    const pcheck = await query('SELECT 1 FROM products WHERE key=$1 AND is_active=TRUE', [String(product)]);
+    if (pcheck.rowCount === 0) return res.status(400).json({ success:false, message:'unknown product key' });
+    const tcheck = await query('SELECT 1 FROM tenants WHERE id=$1', [tenant_id]);
+    if (tcheck.rowCount === 0) return res.status(400).json({ success:false, message:'tenant not found' });
     const ins = await query(
       `INSERT INTO product_instances (product_key, owner_admin_id, tenant_id, name, meta)
        VALUES ($1,$2,$3,$4,$5::jsonb)
@@ -393,6 +398,7 @@ router.post('/products/instances', async (req, res) => {
     if (ins.rowCount === 0) return res.status(409).json({ success:false, message:'instance exists' });
     return res.status(201).json({ success:true, data:{ id: ins.rows[0].id } });
   } catch (e) {
+    console.error('create instance failed', e);
     return res.status(500).json({ success:false, message:'create instance failed' });
   }
 });
