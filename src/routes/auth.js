@@ -403,3 +403,94 @@ router.post('/tenants', async (req, res) => {
     return res.status(500).json({ success:false, message:'create tenant failed' });
   }
 });
+
+// --- Lizenzverwaltung ---
+// Liste Lizenzen eines Tenants (Owner oder Super erforderlich)
+router.get('/tenants/:tenantId/licenses', async (req, res) => {
+  try {
+    const auth = req.headers.authorization || '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
+    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
+    const tenantId = parseInt(req.params.tenantId, 10);
+    if (!tenantId) return res.status(400).json({ success:false, message:'invalid tenantId' });
+    const isSuper = Array.isArray(payload.roles) && payload.roles.includes('super');
+    if (!isSuper) {
+      const rel = await query('SELECT role FROM tenant_admins WHERE tenant_id=$1 AND admin_id=$2', [tenantId, payload.sub]);
+      if (rel.rowCount === 0) return res.status(403).json({ success:false, message:'forbidden' });
+    }
+    const r = await query('SELECT id, plan, status, valid_from, valid_until, meta, created_at FROM licenses WHERE tenant_id=$1 ORDER BY id DESC', [tenantId]);
+    return res.json({ success:true, data: r.rows });
+  } catch (e) {
+    return res.status(500).json({ success:false, message:'list licenses failed' });
+  }
+});
+
+// Lizenz anlegen/aktualisieren (Super oder Owner)
+router.post('/tenants/:tenantId/licenses', async (req, res) => {
+  try {
+    const auth = req.headers.authorization || '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
+    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
+    const tenantId = parseInt(req.params.tenantId, 10);
+    if (!tenantId) return res.status(400).json({ success:false, message:'invalid tenantId' });
+    const { id, plan, status, valid_from, valid_until, meta } = req.body || {};
+    if (!plan) return res.status(400).json({ success:false, message:'plan required' });
+
+    const isSuper = Array.isArray(payload.roles) && payload.roles.includes('super');
+    if (!isSuper) {
+      const rel = await query('SELECT role FROM tenant_admins WHERE tenant_id=$1 AND admin_id=$2', [tenantId, payload.sub]);
+      if (rel.rowCount === 0) return res.status(403).json({ success:false, message:'forbidden' });
+      const role = rel.rows[0].role || 'admin';
+      if (!['owner','admin'].includes(role)) return res.status(403).json({ success:false, message:'forbidden' });
+    }
+
+    if (id) {
+      const upd = await query(
+        `UPDATE licenses
+         SET plan = COALESCE($1, plan),
+             status = COALESCE($2, status),
+             valid_from = COALESCE($3::timestamp, valid_from),
+             valid_until = COALESCE($4::timestamp, valid_until),
+             meta = COALESCE($5::jsonb, meta)
+         WHERE id=$6 AND tenant_id=$7
+         RETURNING id, tenant_id, plan, status, valid_from, valid_until, meta`,
+        [plan, status, valid_from, valid_until, meta ? JSON.stringify(meta) : null, id, tenantId]
+      );
+      if (upd.rowCount === 0) return res.status(404).json({ success:false, message:'license not found' });
+      return res.json({ success:true, data: upd.rows[0] });
+    } else {
+      const ins = await query(
+        `INSERT INTO licenses (tenant_id, plan, status, valid_from, valid_until, meta)
+         VALUES ($1,$2,COALESCE($3,'active'),COALESCE($4, NOW()),$5,$6)
+         RETURNING id, tenant_id, plan, status, valid_from, valid_until, meta`,
+        [tenantId, plan, status || 'active', valid_from || null, valid_until || null, meta ? JSON.stringify(meta) : null]
+      );
+      return res.status(201).json({ success:true, data: ins.rows[0] });
+    }
+  } catch (e) {
+    console.error('upsert license error', e);
+    return res.status(500).json({ success:false, message:'upsert license failed' });
+  }
+});
+
+// Lizenz löschen (nur Super)
+router.delete('/tenants/:tenantId/licenses/:id', async (req, res) => {
+  try {
+    const auth = req.headers.authorization || '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
+    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
+    const isSuper = Array.isArray(payload.roles) && payload.roles.includes('super');
+    if (!isSuper) return res.status(403).json({ success:false, message:'forbidden' });
+    const tenantId = parseInt(req.params.tenantId, 10);
+    const id = parseInt(req.params.id, 10);
+    if (!tenantId || !id) return res.status(400).json({ success:false, message:'invalid ids' });
+    const del = await query('DELETE FROM licenses WHERE id=$1 AND tenant_id=$2', [id, tenantId]);
+    if (del.rowCount === 0) return res.status(404).json({ success:false, message:'not found' });
+    return res.json({ success:true, message:'deleted' });
+  } catch (e) {
+    return res.status(500).json({ success:false, message:'delete license failed' });
+  }
+});

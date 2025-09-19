@@ -37,6 +37,16 @@
   <h2>Meine Veranstalter <span id="role" class="muted"></span></h2>
   <ul id="tenants"></ul>
 
+  <h2>Lizenzverwaltung</h2>
+  <div class="row">
+    <input id="lic_tenant_id" placeholder="Tenant-ID" style="width:120px" />
+    <input id="lic_plan" placeholder="Plan (z.B. basic/pro)" />
+    <input id="lic_valid_until" placeholder="Gültig bis (YYYY-MM-DD)" />
+    <button onclick="createOrUpdateLicense()">Lizenz speichern</button>
+    <button onclick="loadLicenses()">Lizenzen laden</button>
+  </div>
+  <ul id="licenses"></ul>
+
   <script>
     const CFG = window.ACCOUNT_CFG || {};
     const AUTH_BASE = CFG.AUTH_BASE || '/api';
@@ -99,6 +109,59 @@
         showMsg('Veranstalter angelegt', true);
         document.getElementById('tenant_name').value='';
         await loadTenants();
+      } catch(e){ showMsg(e.message, false); }
+    }
+
+    async function loadLicenses(){
+      const t = getToken(); if (!t){ showMsg('Bitte einloggen', false); return; }
+      const tenantId = parseInt(document.getElementById('lic_tenant_id')?.value||'');
+      if (!tenantId){ showMsg('Tenant-ID erforderlich', false); return; }
+      try {
+        const res = await fetch(`${AUTH_BASE}/auth/tenants/${tenantId}/licenses`, { headers: { Authorization: `Bearer ${t}` }});
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`);
+        const ul = document.getElementById('licenses'); ul.innerHTML='';
+        (data.data||[]).forEach(l => {
+          const li = document.createElement('li');
+          const delBtn = document.createElement('button');
+          delBtn.textContent = 'Löschen';
+          delBtn.style.marginLeft='8px';
+          delBtn.onclick = () => deleteLicense(tenantId, l.id);
+          li.textContent = `#${l.id} – ${l.plan} (${l.status}) bis ${l.valid_until || '-'} `;
+          li.appendChild(delBtn);
+          ul.appendChild(li);
+        });
+        showMsg(`${(data.data||[]).length} Lizenzen geladen`, true);
+      } catch(e){ showMsg(e.message, false); }
+    }
+
+    async function createOrUpdateLicense(){
+      const t = getToken(); if (!t){ showMsg('Bitte einloggen', false); return; }
+      const tenantId = parseInt(document.getElementById('lic_tenant_id')?.value||'');
+      const plan = (document.getElementById('lic_plan')?.value||'').trim();
+      const valid_until = (document.getElementById('lic_valid_until')?.value||'').trim() || null;
+      if (!tenantId || !plan) { showMsg('Tenant-ID und Plan erforderlich', false); return; }
+      try {
+        const res = await fetch(`${AUTH_BASE}/auth/tenants/${tenantId}/licenses`, {
+          method: 'POST', headers: { 'Content-Type':'application/json', Authorization: `Bearer ${t}` },
+          body: JSON.stringify({ plan, valid_until })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`);
+        showMsg('Lizenz gespeichert', true);
+        await loadLicenses();
+      } catch(e){ showMsg(e.message, false); }
+    }
+
+    async function deleteLicense(tenantId, id){
+      const t = getToken(); if (!t){ showMsg('Bitte einloggen', false); return; }
+      if (!confirm('Lizenz wirklich löschen?')) return;
+      try {
+        const res = await fetch(`${AUTH_BASE}/auth/tenants/${tenantId}/licenses/${id}`, { method:'DELETE', headers: { Authorization: `Bearer ${t}` }});
+        const data = await res.json().catch(()=>({}));
+        if (!res.ok || data.success === false) throw new Error(data.message || `HTTP ${res.status}`);
+        showMsg('Lizenz gelöscht', true);
+        await loadLicenses();
       } catch(e){ showMsg(e.message, false); }
     }
 
