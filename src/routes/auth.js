@@ -347,6 +347,24 @@ router.post('/allowed-admins', async (req, res) => {
   }
 });
 
+router.delete('/allowed-admins', async (req, res) => {
+  try {
+    const auth = req.headers.authorization || '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
+    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
+    const isSuper = Array.isArray(payload.roles) && payload.roles.includes('super');
+    if (!isSuper) return res.status(403).json({ success:false, message:'forbidden' });
+    const email = (req.query.email||'').toString().trim();
+    if (!email) return res.status(400).json({ success:false, message:'email required' });
+    const del = await query('DELETE FROM allowed_admins WHERE LOWER(email)=LOWER($1)', [email]);
+    if (del.rowCount === 0) return res.status(404).json({ success:false, message:'not found' });
+    return res.json({ success:true, message:'deleted' });
+  } catch (e) {
+    return res.status(500).json({ success:false, message:'delete failed' });
+  }
+});
+
 // Tenant löschen (nur wenn keine weiteren Daten vorhanden sind)
 router.delete('/tenants/:id', async (req, res) => {
   try {
@@ -401,6 +419,116 @@ router.post('/tenants', async (req, res) => {
   } catch (e) {
     console.error('create tenant error', e);
     return res.status(500).json({ success:false, message:'create tenant failed' });
+  }
+});
+
+// --- Memberships (Admin-Zuweisungen pro Tenant) ---
+// Mitglieder eines Tenants auflisten (nur Super oder Tenant-Mitglied)
+router.get('/tenants/:tenantId/members', async (req, res) => {
+  try {
+    const auth = req.headers.authorization || '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
+    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
+    const tenantId = parseInt(req.params.tenantId, 10);
+    if (!tenantId) return res.status(400).json({ success:false, message:'invalid tenantId' });
+    const isSuper = Array.isArray(payload.roles) && payload.roles.includes('super');
+    if (!isSuper) {
+      const rel = await query('SELECT 1 FROM tenant_admins WHERE tenant_id=$1 AND admin_id=$2', [tenantId, payload.sub]);
+      if (rel.rowCount === 0) return res.status(403).json({ success:false, message:'forbidden' });
+    }
+    const r = await query(
+      `SELECT a.id as admin_id, a.email, ta.role
+       FROM tenant_admins ta
+       JOIN admins a ON a.id = ta.admin_id
+       WHERE ta.tenant_id=$1
+       ORDER BY a.email ASC`,
+      [tenantId]
+    );
+    return res.json({ success:true, data: r.rows });
+  } catch (e) {
+    return res.status(500).json({ success:false, message:'list members failed' });
+  }
+});
+
+// Mitglied hinzufügen (nur Super oder Owner)
+router.post('/tenants/:tenantId/members', async (req, res) => {
+  try {
+    const auth = req.headers.authorization || '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
+    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
+    const tenantId = parseInt(req.params.tenantId, 10);
+    if (!tenantId) return res.status(400).json({ success:false, message:'invalid tenantId' });
+    const { email, role } = req.body || {};
+    const normEmail = (email||'').trim().toLowerCase();
+    if (!normEmail) return res.status(400).json({ success:false, message:'email required' });
+    const desiredRole = (role||'admin').toLowerCase();
+
+    // Berechtigung prüfen
+    const isSuper = Array.isArray(payload.roles) && payload.roles.includes('super');
+    if (!isSuper) {
+      const rel = await query('SELECT role FROM tenant_admins WHERE tenant_id=$1 AND admin_id=$2', [tenantId, payload.sub]);
+      if (rel.rowCount === 0) return res.status(403).json({ success:false, message:'forbidden' });
+      const callerRole = (rel.rows[0].role||'admin').toLowerCase();
+      if (callerRole !== 'owner') return res.status(403).json({ success:false, message:'owner required' });
+    }
+
+    // Admin anlegen/finden
+    let adminId;
+    const existing = await query('SELECT id FROM admins WHERE LOWER(email)=LOWER($1)', [normEmail]);
+    if (existing.rowCount > 0) {
+      adminId = existing.rows[0].id;
+    } else {
+      const ins = await query('INSERT INTO admins (email, name) VALUES ($1,$2) RETURNING id', [normEmail, normEmail]);
+      adminId = ins.rows[0].id;
+      // In Allowlist aufnehmen (optional, falls Domain-Restriktion aktiv ist)
+      try { await query('INSERT INTO allowed_admins (email) VALUES ($1) ON CONFLICT (email) DO NOTHING', [normEmail]); } catch(_){ }
+    }
+
+    // Beziehung setzen
+    await query(
+      `INSERT INTO tenant_admins (tenant_id, admin_id, role)
+       VALUES ($1,$2,$3)
+       ON CONFLICT (tenant_id, admin_id) DO UPDATE SET role=EXCLUDED.role`,
+      [tenantId, adminId, desiredRole]
+    );
+    return res.status(201).json({ success:true });
+  } catch (e) {
+    return res.status(500).json({ success:false, message:'add member failed' });
+  }
+});
+
+// Mitglied entfernen (nur Super oder Owner; letzten Owner schützen)
+router.delete('/tenants/:tenantId/members', async (req, res) => {
+  try {
+    const auth = req.headers.authorization || '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
+    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
+    const tenantId = parseInt(req.params.tenantId, 10);
+    const email = (req.query.email||'').toString().trim().toLowerCase();
+    if (!tenantId || !email) return res.status(400).json({ success:false, message:'invalid params' });
+
+    const isSuper = Array.isArray(payload.roles) && payload.roles.includes('super');
+    if (!isSuper) {
+      const rel = await query('SELECT role FROM tenant_admins WHERE tenant_id=$1 AND admin_id=$2', [tenantId, payload.sub]);
+      if (rel.rowCount === 0) return res.status(403).json({ success:false, message:'forbidden' });
+      const callerRole = (rel.rows[0].role||'admin').toLowerCase();
+      if (callerRole !== 'owner') return res.status(403).json({ success:false, message:'owner required' });
+    }
+
+    const target = await query('SELECT a.id, ta.role FROM admins a JOIN tenant_admins ta ON ta.admin_id=a.id AND ta.tenant_id=$1 WHERE LOWER(a.email)=LOWER($2)', [tenantId, email]);
+    if (target.rowCount === 0) return res.status(404).json({ success:false, message:'member not found' });
+    const targetRole = (target.rows[0].role||'admin').toLowerCase();
+    if (targetRole === 'owner') {
+      const owners = await query('SELECT COUNT(*)::int AS c FROM tenant_admins WHERE tenant_id=$1 AND LOWER(role)=\'owner\'', [tenantId]);
+      if (owners.rows[0].c <= 1) return res.status(400).json({ success:false, message:'cannot remove last owner' });
+    }
+    await query('DELETE FROM tenant_admins WHERE tenant_id=$1 AND admin_id=$2', [tenantId, target.rows[0].id]);
+    return res.json({ success:true });
+  } catch (e) {
+    return res.status(500).json({ success:false, message:'remove member failed' });
   }
 });
 
