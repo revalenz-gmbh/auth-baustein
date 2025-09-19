@@ -476,12 +476,17 @@ router.post('/tenants/:tenantId/members', async (req, res) => {
       if (callerRole !== 'owner') return res.status(403).json({ success:false, message:'owner required' });
     }
 
-    // Admin anlegen/finden
+    // Admin anlegen/finden (bestehende Namen NICHT überschreiben)
     let adminId;
-    const existing = await query('SELECT id FROM admins WHERE LOWER(email)=LOWER($1)', [normEmail]);
+    const existing = await query('SELECT id, first_name, last_name FROM admins WHERE LOWER(email)=LOWER($1)', [normEmail]);
     if (existing.rowCount > 0) {
       adminId = existing.rows[0].id;
-      await query('UPDATE admins SET name=$1, first_name=$2, last_name=$3 WHERE id=$4', [`${first_name} ${last_name}`.trim(), first_name, last_name, adminId]);
+      // Prüfen: Ist Nutzer bereits Mitglied dieser Organisation?
+      const relExists = await query('SELECT 1 FROM tenant_admins WHERE tenant_id=$1 AND admin_id=$2', [tenantId, adminId]);
+      if (relExists.rowCount > 0) {
+        return res.status(409).json({ success:false, message:'Mitglied ist bereits in dieser Organisation registriert' });
+      }
+      // Bestehenden Namen nicht überschreiben – nur Mitgliedschaft setzen
     } else {
       const ins = await query('INSERT INTO admins (email, name, first_name, last_name) VALUES ($1,$2,$3,$4) RETURNING id', [normEmail, `${first_name} ${last_name}`.trim(), first_name, last_name]);
       adminId = ins.rows[0].id;

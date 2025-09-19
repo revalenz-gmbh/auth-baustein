@@ -251,6 +251,7 @@
           body: JSON.stringify({ email, role, first_name, last_name, product_key })
         });
         const data = await res.json();
+        if (res.status === 409) { showMsg(data.message || 'Bereits registriert', false); return; }
         if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`);
         showMsg('Mitglied hinzugefügt', true);
         await loadMembers();
