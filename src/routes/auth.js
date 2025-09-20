@@ -36,8 +36,8 @@ router.post('/register', async (req, res) => {
     if (!email || !password) return res.status(400).json({ success: false, message: 'email & password required' });
     const hash = await bcrypt.hash(password, 10);
     const result = await query(
-      'INSERT INTO admins (name, email, password_hash) VALUES ($1,$2,$3) ON CONFLICT (email) DO NOTHING RETURNING id, name, email, created_at',
-      [name || '', email, hash]
+      'INSERT INTO users (name, email, password_hash, role, status) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (email) DO NOTHING RETURNING id, name, email, role, status, created_at',
+      [name || '', email, hash, 'ADMIN', 'active']
     );
     if (result.rowCount === 0) return res.status(409).json({ success: false, message: 'email exists' });
     return res.json({ success: true, data: result.rows[0] });
@@ -52,10 +52,10 @@ router.post('/login', async (req, res) => {
     const { email, password, api_key } = req.body || {};
     let admin;
     if (api_key) {
-      const r = await query('SELECT * FROM admins WHERE api_key = $1', [api_key]);
+      const r = await query('SELECT * FROM users WHERE api_key = $1', [api_key]);
       admin = r.rows[0];
     } else if (email && password) {
-      const r = await query('SELECT * FROM admins WHERE email = $1', [email]);
+      const r = await query('SELECT * FROM users WHERE email = $1', [email]);
       admin = r.rows[0];
       if (!admin) return res.status(401).json({ success: false, message: 'invalid credentials' });
       const ok = await bcrypt.compare(password, admin.password_hash || '');
@@ -170,25 +170,25 @@ router.get('/oauth/google/callback', async (req, res) => {
 
     // 1) Existiert bereits ein Account mit diesem Provider?
     const byProvider = await query(
-      'SELECT * FROM admins WHERE provider=$1 AND provider_id=$2', ['google', user.sub]
+      'SELECT * FROM users WHERE provider=$1 AND provider_id=$2', ['google', user.sub]
     );
     let admin;
     if (byProvider.rowCount > 0) {
       admin = byProvider.rows[0];
     } else {
       // 2) Sonst: Gibt es bereits einen Account mit der E-Mail? Dann Provider verknüpfen
-      const byEmail = await query('SELECT * FROM admins WHERE email=$1', [user.email]);
+      const byEmail = await query('SELECT * FROM users WHERE email=$1', [user.email]);
       if (byEmail.rowCount > 0) {
         const upd = await query(
-          'UPDATE admins SET provider=$1, provider_id=$2 WHERE id=$3 RETURNING id, email',
+          'UPDATE users SET provider=$1, provider_id=$2 WHERE id=$3 RETURNING id, email',
           ['google', user.sub, byEmail.rows[0].id]
         );
         admin = upd.rows[0];
       } else {
         // 3) Neu anlegen
         const ins = await query(
-          `INSERT INTO admins (name, email, provider, provider_id)
-           VALUES ($1,$2,'google',$3)
+          `INSERT INTO users (name, email, provider, provider_id, role, status)
+           VALUES ($1,$2,'google',$3,'CLIENT','active')
            ON CONFLICT (provider, provider_id)
            DO UPDATE SET name=EXCLUDED.name, email=EXCLUDED.email
            RETURNING id, email`,
@@ -609,7 +609,7 @@ router.post('/tenants/:tenantId/members', async (req, res) => {
 
     // Admin anlegen/finden (bestehende Namen NICHT überschreiben)
     let adminId;
-    const existing = await query('SELECT id, first_name, last_name FROM admins WHERE LOWER(email)=LOWER($1)', [normEmail]);
+    const existing = await query('SELECT id, name FROM users WHERE LOWER(email)=LOWER($1)', [normEmail]);
     if (existing.rowCount > 0) {
       adminId = existing.rows[0].id;
       // Prüfen: Ist Nutzer bereits Mitglied dieser Organisation?
@@ -619,7 +619,7 @@ router.post('/tenants/:tenantId/members', async (req, res) => {
       }
       // Bestehenden Namen nicht überschreiben – nur Mitgliedschaft setzen
     } else {
-      const ins = await query('INSERT INTO admins (email, name, first_name, last_name) VALUES ($1,$2,$3,$4) RETURNING id', [normEmail, `${first_name} ${last_name}`.trim(), first_name, last_name]);
+      const ins = await query('INSERT INTO users (email, name, role, status) VALUES ($1,$2,$3,$4) RETURNING id', [normEmail, `${first_name} ${last_name}`.trim(), 'CLIENT', 'active']);
       adminId = ins.rows[0].id;
       try { await query('INSERT INTO allowed_admins (email) VALUES ($1) ON CONFLICT (email) DO NOTHING', [normEmail]); } catch(_){ }
     }
@@ -666,7 +666,7 @@ router.delete('/tenants/:tenantId/members', async (req, res) => {
       if (callerRole !== 'owner') return res.status(403).json({ success:false, message:'owner required' });
     }
 
-    const target = await query('SELECT a.id, ta.role FROM admins a JOIN tenant_admins ta ON ta.admin_id=a.id AND ta.tenant_id=$1 WHERE LOWER(a.email)=LOWER($2)', [tenantId, email]);
+    const target = await query('SELECT u.id, u.role FROM users u JOIN tenant_admins ta ON ta.admin_id=u.id AND ta.tenant_id=$1 WHERE LOWER(u.email)=LOWER($2)', [tenantId, email]);
     if (target.rowCount === 0) return res.status(404).json({ success:false, message:'member not found' });
     const targetRole = (target.rows[0].role||'admin').toLowerCase();
     if (targetRole === 'owner') {
