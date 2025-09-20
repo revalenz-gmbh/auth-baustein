@@ -3,7 +3,7 @@ window.ACCOUNT_CFG = {
   // Bausteine-Konfiguration
   BAUSTEINE_MODE: true,
   // Für Integration in andere Apps
-  EXTERNAL_API_URL: 'https://auth.revalenz.de/api',
+  EXTERNAL_API_URL: 'https://accounts.revalenz.de/api',
   // Für lokale Entwicklung
   LOCAL_API_URL: 'http://localhost:3000/api'
 };
