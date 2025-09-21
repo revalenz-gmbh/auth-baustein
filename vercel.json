@@ -7,6 +7,7 @@
   ],
   "routes": [
     { "src": "/api/(.*)", "dest": "/api/[...all].js" },
+    { "src": "/auth/(.*)", "dest": "/api/[...all].js" },
     { "src": "/favicon.(ico|png)", "status": 204 },
     { "src": "/(.*)", "dest": "/index.html" }
   ]
