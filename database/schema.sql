@@ -50,6 +50,22 @@ CREATE TABLE IF NOT EXISTS user_sessions (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Workshop-Anmeldungen Tabelle
+CREATE TABLE IF NOT EXISTS workshop_registrations (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  workshop_type VARCHAR(100) DEFAULT 'kickstart', -- kickstart, custom, etc.
+  workshop_date DATE NOT NULL,
+  company VARCHAR(255), -- Organisation (optional)
+  experience TEXT, -- Vorkenntnisse (optional)
+  goals TEXT, -- Ziele des Teilnehmers
+  message TEXT, -- Nachricht (optional)
+  status VARCHAR(50) DEFAULT 'registered', -- registered, confirmed, cancelled, completed
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(user_id, workshop_date) -- Ein Benutzer kann sich nur einmal pro Termin anmelden
+);
+
 -- Constraints
 DO $$ BEGIN
   -- Provider + Provider ID müssen eindeutig sein
@@ -87,6 +103,11 @@ CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_sessions_token ON user_sessions(session_token);
 CREATE INDEX IF NOT EXISTS idx_user_sessions_expires ON user_sessions(expires_at);
 
+CREATE INDEX IF NOT EXISTS idx_workshop_registrations_user_id ON workshop_registrations(user_id);
+CREATE INDEX IF NOT EXISTS idx_workshop_registrations_workshop_date ON workshop_registrations(workshop_date);
+CREATE INDEX IF NOT EXISTS idx_workshop_registrations_workshop_type ON workshop_registrations(workshop_type);
+CREATE INDEX IF NOT EXISTS idx_workshop_registrations_status ON workshop_registrations(status);
+
 -- Trigger für updated_at
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
@@ -100,6 +121,9 @@ CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_tenants_updated_at BEFORE UPDATE ON tenants
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_workshop_registrations_updated_at BEFORE UPDATE ON workshop_registrations
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- Standard-Tenant erstellen (falls nicht vorhanden)

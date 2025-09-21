@@ -2,6 +2,7 @@ import express from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
 import authRoutes from './routes/auth.js';
+import workshopRoutes from './routes/workshops.js';
 
 export function buildApp() {
   const app = express();
@@ -31,6 +32,7 @@ export function buildApp() {
 
   app.get('/', (req, res) => res.json({ name: 'auth-baustein', status: 'ok' }));
   app.use('/auth', authRoutes);
+  app.use('/workshops', workshopRoutes);
 
   // 404
   app.use('*', (req, res) => {
