@@ -1,7 +1,7 @@
 {
   "name": "@revalenz/auth-baustein",
   "version": "1.0.0",
-  "description": "Flexibler, wiederverwendbarer Authentifizierungs-Service für moderne Webanwendungen",
+  "description": "Flexibler, wiederverwendbarer Authentifizierungs-Service für moderne Webanwendungen. Entwickelt mit KI-Unterstützung.",
   "type": "module",
   "main": "src/index.js",
   "keywords": [
@@ -14,7 +14,11 @@
     "postgresql",
     "baustein",
     "revalenz",
-    "modular"
+    "modular",
+    "ai-developed",
+    "ki-entwicklung",
+    "ai-assisted",
+    "modern-development"
   ],
   "author": {
     "name": "Revalenz GmbH",

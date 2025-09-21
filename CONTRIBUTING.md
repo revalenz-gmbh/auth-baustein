@@ -2,6 +2,8 @@
 
 Vielen Dank für Ihr Interesse am Auth-Baustein! Wir freuen uns über Beiträge von der Community.
 
+> 🤖 **KI-Entwicklung**: Dieses Projekt wurde mit Unterstützung von KI-Agenten entwickelt. Wir ermutigen auch Contributors, KI-Tools für ihre Beiträge zu nutzen - es macht die Entwicklung effizienter und qualitativ hochwertiger!
+
 ## 📋 **Beitragsrichtlinien**
 
 ### **🎯 Was wir begrüßen:**
@@ -78,6 +80,13 @@ npm run build
 - ✅ **Prettier** für Code-Formatierung
 - ✅ **JSDoc** für Funktionen
 - ✅ **TypeScript** für neue Features
+
+### **🤖 KI-Tools verwenden**
+- ✅ **Code-Generierung** mit KI-Agenten
+- ✅ **Code-Review** mit KI-Unterstützung
+- ✅ **Dokumentation** automatisch generieren
+- ✅ **Testing** mit KI-generierten Tests
+- ✅ **Refactoring** mit KI-Unterstützung
 
 ### **Commit-Messages**
 ```
