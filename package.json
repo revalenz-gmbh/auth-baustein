@@ -1,11 +1,48 @@
 {
-  "name": "auth-baustein",
-  "version": "0.1.0",
+  "name": "@revalenz/auth-baustein",
+  "version": "1.0.0",
+  "description": "Flexibler, wiederverwendbarer Authentifizierungs-Service für moderne Webanwendungen",
   "type": "module",
   "main": "src/index.js",
+  "keywords": [
+    "authentication",
+    "auth",
+    "jwt",
+    "oauth",
+    "express",
+    "nodejs",
+    "postgresql",
+    "baustein",
+    "revalenz",
+    "modular"
+  ],
+  "author": {
+    "name": "Revalenz GmbH",
+    "email": "info@revalenz.de",
+    "url": "https://revalenz.de"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/revalenz-gmbh/auth-baustein#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/revalenz-gmbh/auth-baustein.git"
+  },
+  "bugs": {
+    "url": "https://github.com/revalenz-gmbh/auth-baustein/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  },
   "scripts": {
     "dev": "node src/index.js",
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "test": "echo \"Tests coming soon\" && exit 0",
+    "lint": "echo \"Linting coming soon\" && exit 0",
+    "build": "echo \"Build completed\" && exit 0",
+    "security": "npm audit --audit-level=moderate",
+    "deps:check": "npm outdated",
+    "deps:update": "npm update"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -15,5 +52,17 @@
     "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
     "pg": "^8.11.5"
-  }
+  },
+  "devDependencies": {
+    "eslint": "^8.0.0",
+    "prettier": "^3.0.0"
+  },
+  "files": [
+    "src/",
+    "database/",
+    "examples/",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ]
 }
