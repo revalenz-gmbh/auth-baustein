@@ -1,0 +1,547 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Revalenz Accounts</title>
+  <link rel="icon" href="data:,">
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin: 24px; color: #111; }
+    h1 { color: #0f766e; }
+    .row { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; }
+    input, button { padding: 8px 12px; font-size: 14px; }
+    button { background: #0f766e; color: #fff; border: 0; border-radius: 6px; cursor: pointer; }
+    button:disabled { opacity: .6; cursor: not-allowed; }
+    ul { padding-left: 18px; }
+    .muted { color: #6b7280; font-size: 12px; }
+    .error { color: #b91c1c; }
+    .success { color: #065f46; }
+  </style>
+  <script src="config.js"></script>
+</head>
+<body>
+  <h1>Revalenz Community Verwaltung</h1>
+  <div class="row">
+    <button onclick="doLogin()">Mit Google anmelden</button>
+    <button onclick="logout()">Logout</button>
+    <span id="auth" class="muted"></span>
+  </div>
+
+  <div id="msg" class="muted"></div>
+
+  <h2>Organisationen</h2>
+  <div class="row">
+    <input id="tenant_name" placeholder="Neue Organisation – Name" />
+    <button onclick="createTenant()">Anlegen</button>
+    <button onclick="loadTenants()">Aktualisieren</button>
+  </div>
+  <ul id="tenants"></ul>
+
+  <h2>Laufzeit Organisations‑Plan</h2>
+  <div class="row">
+    <input id="lic_tenant_id" placeholder="Tenant-ID" style="width:120px" />
+    <input id="lic_plan" placeholder="Plan (z.B. basic/pro)" />
+    <input id="lic_valid_until" placeholder="Gültig bis (YYYY-MM-DD)" />
+    <button onclick="createOrUpdateLicense()">Lizenz speichern</button>
+    <button onclick="loadLicenses()">Lizenzen laden</button>
+  </div>
+  <ul id="licenses"></ul>
+
+  <h2>Mitglieder verwalten</h2>
+  <div class="row">
+    <input id="mem_tenant_id" placeholder="Tenant-ID" style="width:120px" />
+    <input id="mem_email" placeholder="E-Mail" />
+    <input id="mem_first_name" placeholder="Vorname" style="width:140px" />
+    <input id="mem_last_name" placeholder="Nachname" style="width:160px" />
+    <select id="mem_role">
+      <option value="user">user</option>
+      <option value="admin">admin</option>
+      <option value="owner">owner</option>
+    </select>
+    <button onclick="addMember()">Hinzufügen</button>
+    <button onclick="loadMembers()">Mitglieder laden</button>
+  </div>
+  <ul id="members"></ul>
+
+  <div class="row">
+    <label class="muted">Produkt für Mitglied (optional):</label>
+    <select id="product_key_member"></select>
+  </div>
+
+  <h2>Produkte (Registry)</h2>
+  <div class="row">
+    <button onclick="loadProducts()">Produkte laden</button>
+  </div>
+  <ul id="products"></ul>
+  <div id="products_admin" style="display:none; margin-top:12px;">
+    <div class="row">
+      <input id="prod_key" placeholder="Produkt-Key (z.B. tickets)" style="width:180px" />
+      <input id="prod_name" placeholder="Produkt-Name" />
+      <label class="muted"><input type="checkbox" id="prod_active" checked /> aktiv</label>
+      <button onclick="createProduct()">Produkt anlegen</button>
+    </div>
+  </div>
+
+  <h2>Eigene Produkt‑Instanzen</h2>
+  <div class="row">
+    <input id="pi_product" placeholder="Produkt-Key (z.B. tickets)" style="width:160px" />
+    <input id="pi_name" placeholder="Instanz‑Name" />
+    <input id="pi_tenant" placeholder="Tenant-ID" style="width:160px" />
+    <button onclick="createInstance()">Instanz anlegen</button>
+    <button onclick="loadInstances()">Instanzen laden</button>
+  </div>
+  <ul id="instances"></ul>
+
+  <h2>Whitelist (Super‑Admin)</h2>
+  <div class="row">
+    <input id="wl_email" placeholder="E-Mail" />
+    <input id="wl_tenant_id" placeholder="(optional) Tenant-ID" style="width:140px" />
+    <select id="wl_role">
+      <option value="admin">admin</option>
+      <option value="owner">owner</option>
+    </select>
+    <button onclick="addWhitelist()">Whitelist hinzufügen</button>
+    <button onclick="loadWhitelist()">Whitelist laden</button>
+  </div>
+  <ul id="whitelist"></ul>
+
+  <script>
+    const CFG = window.ACCOUNT_CFG || {};
+    const AUTH_BASE = CFG.AUTH_BASE || '/api';
+
+    function getToken(){ try { return localStorage.getItem('acc_jwt') || ''; } catch(_) { return ''; } }
+    function setToken(t){ try { localStorage.setItem('acc_jwt', t || ''); } catch(_) {} renderAuth(); if (t) { try{ loadTenants(); }catch(_){} } }
+    function renderAuth(){
+      const t = getToken();
+      const el = document.getElementById('auth');
+      el.textContent = t ? 'Angemeldet' : 'Nicht angemeldet';
+      el.className = t ? 'success' : 'muted';
+      try {
+        if (t){
+          const payload = JSON.parse(atob(t.split('.')[1]));
+          const r = document.getElementById('role');
+          const isSuper = Array.isArray(payload.roles) && payload.roles.includes('super');
+          r.textContent = isSuper ? '(Super‑Admin)' : '';
+          const pa = document.getElementById('products_admin');
+          if (pa) pa.style.display = isSuper ? '' : 'none';
+        }
+      } catch(_){ }
+    }
+    function showMsg(m, ok){ const el = document.getElementById('msg'); el.textContent = m || ''; el.className = ok ? 'success' : 'error'; }
+
+    function doLogin(){
+      const origin = location.origin;
+      const ret = location.href.split('#')[0];
+      window.location.href = `${AUTH_BASE}/auth/oauth/google?mode=redirect&origin=${encodeURIComponent(origin)}&return=${encodeURIComponent(ret)}`;
+    }
+    function logout(){ setToken(''); document.getElementById('tenants').innerHTML=''; showMsg('Abgemeldet', true); }
+
+    async function loadTenants(){
+      const t = getToken(); if (!t){ showMsg('Bitte einloggen', false); return; }
+      try {
+        const res = await fetch(`${AUTH_BASE}/auth/tenants`, { headers: { Authorization: `Bearer ${t}` }});
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`);
+        const ul = document.getElementById('tenants'); ul.innerHTML='';
+        (data.data || []).forEach(x => {
+          const li=document.createElement('li');
+          const delBtn = document.createElement('button');
+          delBtn.textContent = 'Löschen';
+          delBtn.style.marginLeft = '8px';
+          delBtn.onclick = () => deleteTenant(x.id, x.name);
+          li.textContent = `${x.name} (#${x.id})`;
+          li.appendChild(delBtn);
+          ul.appendChild(li);
+        });
+        showMsg(`${(data.data||[]).length} Veranstalter geladen`, true);
+      } catch(e){ showMsg(e.message, false); }
+    }
+
+    async function createTenant(){
+      const t = getToken(); if (!t){ showMsg('Bitte einloggen', false); return; }
+      const name = (document.getElementById('tenant_name')?.value || '').trim();
+      if (!name) { showMsg('Name erforderlich', false); return; }
+      try {
+        const res = await fetch(`${AUTH_BASE}/auth/tenants`, { method:'POST', headers: { 'Content-Type':'application/json', Authorization: `Bearer ${t}` }, body: JSON.stringify({ name }) });
+        const data = await res.json();
+        if (res.status === 409) { showMsg('Name existiert bereits', false); return; }
+        if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`);
+        showMsg('Veranstalter angelegt', true);
+        document.getElementById('tenant_name').value='';
+        await loadTenants();
+      } catch(e){ showMsg(e.message, false); }
+    }
+
+    async function loadLicenses(){
+      const t = getToken(); if (!t){ showMsg('Bitte einloggen', false); return; }
+      const tenantId = parseInt(document.getElementById('lic_tenant_id')?.value||'');
+      if (!tenantId){ showMsg('Tenant-ID erforderlich', false); return; }
+      try {
+        const res = await fetch(`${AUTH_BASE}/auth/tenants/${tenantId}/licenses`, { headers: { Authorization: `Bearer ${t}` }});
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`);
+        const ul = document.getElementById('licenses'); ul.innerHTML='';
+        const l = data.data || {};
+        const li = document.createElement('li');
+        const delBtn = document.createElement('button');
+        delBtn.textContent = 'Deaktivieren';
+        delBtn.style.marginLeft='8px';
+        delBtn.onclick = () => deleteLicense(tenantId, 'current');
+        li.textContent = `${l.license_plan || '-'} (${l.license_status || '-'}) bis ${l.license_valid_until || '-'} `;
+        li.appendChild(delBtn);
+        ul.appendChild(li);
+        showMsg(`Lizenz geladen`, true);
+      } catch(e){ showMsg(e.message, false); }
+    }
+
+    async function createOrUpdateLicense(){
+      const t = getToken(); if (!t){ showMsg('Bitte einloggen', false); return; }
+      const tenantId = parseInt(document.getElementById('lic_tenant_id')?.value||'');
+      const plan = (document.getElementById('lic_plan')?.value||'').trim();
+      const valid_until = (document.getElementById('lic_valid_until')?.value||'').trim() || null;
+      if (!tenantId || !plan) { showMsg('Tenant-ID und Plan erforderlich', false); return; }
+      try {
+        const res = await fetch(`${AUTH_BASE}/auth/tenants/${tenantId}/licenses`, {
+          method: 'POST', headers: { 'Content-Type':'application/json', Authorization: `Bearer ${t}` },
+          body: JSON.stringify({ plan, valid_until })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`);
+        showMsg('Lizenz gespeichert', true);
+        await loadLicenses();
+      } catch(e){ showMsg(e.message, false); }
+    }
+
+    async function deleteLicense(tenantId){
+      const t = getToken(); if (!t){ showMsg('Bitte einloggen', false); return; }
+      if (!confirm('Lizenz wirklich löschen?')) return;
+      try {
+        const res = await fetch(`${AUTH_BASE}/auth/tenants/${tenantId}/licenses/current`, { method:'DELETE', headers: { Authorization: `Bearer ${t}` }});
+        const data = await res.json().catch(()=>({}));
+        if (!res.ok || data.success === false) throw new Error(data.message || `HTTP ${res.status}`);
+        showMsg('Lizenz gelöscht', true);
+        await loadLicenses();
+      } catch(e){ showMsg(e.message, false); }
+    }
+
+    async function loadMembers(){
+      const t = getToken(); if (!t){ showMsg('Bitte einloggen', false); return; }
+      const tenantId = parseInt(document.getElementById('mem_tenant_id')?.value||'');
+      if (!tenantId){ showMsg('Tenant-ID erforderlich', false); return; }
+      try {
+        const res = await fetch(`${AUTH_BASE}/auth/tenants/${tenantId}/members`, { headers: { Authorization: `Bearer ${t}` }});
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`);
+        const ul = document.getElementById('members'); ul.innerHTML='';
+        (data.data||[]).forEach(async (m) => {
+          const li = document.createElement('li');
+          const delBtn = document.createElement('button');
+          delBtn.textContent = 'Entfernen';
+          delBtn.style.marginLeft='8px';
+          delBtn.onclick = () => removeMember(tenantId, m.email);
+          li.textContent = `${m.first_name||''} ${m.last_name||''} – ${m.email} (${m.role})`;
+          // Services laden
+          try {
+            const svcRes = await fetch(`${AUTH_BASE}/auth/tenants/${tenantId}/entitlements/members/${m.admin_id}`, { headers: { Authorization: `Bearer ${t}` }});
+            const svc = await svcRes.json();
+            if (svcRes.ok && svc.success) {
+              const tag = document.createElement('span');
+              tag.className = 'muted';
+              const list = (svc.data||[]).map(s => s.product_key + (s.status==='active'?'':'(inactive)')).join(', ');
+              tag.textContent = list ? ` – Services: ${list}` : '';
+              li.appendChild(tag);
+              // Buttons zum Zuweisen/Entziehen
+              const assignBtn = document.createElement('button');
+              assignBtn.textContent = 'Service +';
+              assignBtn.style.marginLeft='8px';
+              assignBtn.onclick = async () => {
+                const p = prompt('Produkt-Schlüssel (z.B. tickets)');
+                if (!p) return;
+                try {
+                  const r = await fetch(`${AUTH_BASE}/auth/tenants/${tenantId}/entitlements/members/${m.admin_id}`, {
+                    method:'POST', headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${t}` },
+                    body: JSON.stringify({ product: p, status: 'active' })
+                  });
+                  const dj = await r.json();
+                  if (!r.ok || !dj.success) throw new Error(dj.message||`HTTP ${r.status}`);
+                  showMsg('Service zugewiesen', true);
+                  await loadMembers();
+                } catch(e){ showMsg(e.message, false); }
+              };
+              const revokeBtn = document.createElement('button');
+              revokeBtn.textContent = 'Service −';
+              revokeBtn.style.marginLeft='8px';
+              revokeBtn.onclick = async () => {
+                const p = prompt('Produkt-Schlüssel (z.B. tickets)');
+                if (!p) return;
+                try {
+                  const r = await fetch(`${AUTH_BASE}/auth/tenants/${tenantId}/entitlements/members/${m.admin_id}?product=${encodeURIComponent(p)}`, {
+                    method:'DELETE', headers:{ Authorization:`Bearer ${t}` }
+                  });
+                  const dj = await r.json().catch(()=>({success:true}));
+                  if (!r.ok || dj.success === false) throw new Error(dj.message||`HTTP ${r.status}`);
+                  showMsg('Service entzogen', true);
+                  await loadMembers();
+                } catch(e){ showMsg(e.message, false); }
+              };
+              li.appendChild(assignBtn);
+              li.appendChild(revokeBtn);
+            }
+          } catch(_){}
+          li.appendChild(delBtn);
+          ul.appendChild(li);
+        });
+        showMsg(`${(data.data||[]).length} Mitglieder geladen`, true);
+      } catch(e){ showMsg(e.message, false); }
+    }
+
+    async function addMember(){
+      const t = getToken(); if (!t){ showMsg('Bitte einloggen', false); return; }
+      const tenantId = parseInt(document.getElementById('mem_tenant_id')?.value||'');
+      const email = (document.getElementById('mem_email')?.value||'').trim();
+      const first_name = (document.getElementById('mem_first_name')?.value||'').trim();
+      const last_name = (document.getElementById('mem_last_name')?.value||'').trim();
+      const role = (document.getElementById('mem_role')?.value||'admin');
+      const product_key = (document.getElementById('product_key_member')?.value||'');
+      if (!tenantId || !email || !first_name || !last_name) { showMsg('Tenant-ID, E-Mail, Vor- und Nachname erforderlich', false); return; }
+      try {
+        const res = await fetch(`${AUTH_BASE}/auth/tenants/${tenantId}/members`, {
+          method: 'POST', headers: { 'Content-Type':'application/json', Authorization: `Bearer ${t}` },
+          body: JSON.stringify({ email, role, first_name, last_name, product_key })
+        });
+        const data = await res.json();
+        if (res.status === 409) { showMsg(data.message || 'Bereits registriert', false); return; }
+        if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`);
+        showMsg('Mitglied hinzugefügt', true);
+        await loadMembers();
+        // Felder leeren
+        document.getElementById('mem_email').value='';
+        document.getElementById('mem_first_name').value='';
+        document.getElementById('mem_last_name').value='';
+      } catch(e){ showMsg(e.message, false); }
+    }
+
+    async function removeMember(tenantId, email){
+      const t = getToken(); if (!t){ showMsg('Bitte einloggen', false); return; }
+      if (!confirm(`Mitglied ${email} entfernen?`)) return;
+      try {
+        const qs = new URLSearchParams({ email });
+        const res = await fetch(`${AUTH_BASE}/auth/tenants/${tenantId}/members?`+qs.toString(), { method:'DELETE', headers: { Authorization: `Bearer ${t}` }});
+        const data = await res.json().catch(()=>({}));
+        if (!res.ok || data.success === false) throw new Error(data.message || `HTTP ${res.status}`);
+        showMsg('Mitglied entfernt', true);
+        await loadMembers();
+      } catch(e){ showMsg(e.message, false); }
+    }
+
+    async function loadWhitelist(){
+      const t = getToken(); if (!t){ showMsg('Bitte einloggen', false); return; }
+      try {
+        const res = await fetch(`${AUTH_BASE}/auth/allowed-admins`, { headers: { Authorization: `Bearer ${t}` }});
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`);
+        const ul = document.getElementById('whitelist'); ul.innerHTML='';
+        (data.data||[]).forEach(a => {
+          const li = document.createElement('li');
+          const delBtn = document.createElement('button');
+          delBtn.textContent = 'Entfernen';
+          delBtn.style.marginLeft='8px';
+          delBtn.onclick = () => removeWhitelist(a.email);
+          li.textContent = `${a.email} (tenant: ${a.tenant_id||'-'}, role: ${a.role})`;
+          li.appendChild(delBtn);
+          ul.appendChild(li);
+        });
+        showMsg(`${(data.data||[]).length} Einträge in der Whitelist`, true);
+      } catch(e){ showMsg(e.message, false); }
+    }
+
+    async function addWhitelist(){
+      const t = getToken(); if (!t){ showMsg('Bitte einloggen', false); return; }
+      const email = (document.getElementById('wl_email')?.value||'').trim();
+      const tenant_id = parseInt(document.getElementById('wl_tenant_id')?.value||'') || null;
+      const role = (document.getElementById('wl_role')?.value||'admin');
+      if (!email){ showMsg('E-Mail erforderlich', false); return; }
+      try {
+        const res = await fetch(`${AUTH_BASE}/auth/allowed-admins`, {
+          method:'POST', headers: { 'Content-Type':'application/json', Authorization: `Bearer ${t}` },
+          body: JSON.stringify({ email, tenant_id, role })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`);
+        showMsg('Whitelist-Eintrag gespeichert', true);
+        await loadWhitelist();
+      } catch(e){ showMsg(e.message, false); }
+    }
+
+    async function removeWhitelist(email){
+      const t = getToken(); if (!t){ showMsg('Bitte einloggen', false); return; }
+      if (!confirm(`Whitelist-Eintrag ${email} entfernen?`)) return;
+      try {
+        const qs = new URLSearchParams({ email });
+        const res = await fetch(`${AUTH_BASE}/auth/allowed-admins?`+qs.toString(), { method:'DELETE', headers: { Authorization: `Bearer ${t}` }});
+        const data = await res.json().catch(()=>({}));
+        if (!res.ok || data.success === false) throw new Error(data.message || `HTTP ${res.status}`);
+        showMsg('Whitelist-Eintrag entfernt', true);
+        await loadWhitelist();
+      } catch(e){ showMsg(e.message, false); }
+    }
+
+    async function deleteTenant(id, name){
+      const t = getToken(); if (!t){ showMsg('Bitte einloggen', false); return; }
+      if (!confirm(`Veranstalter "${name}" wirklich löschen?`)) return;
+      try {
+        const res = await fetch(`${AUTH_BASE}/auth/tenants/${id}`, { method:'DELETE', headers: { Authorization: `Bearer ${t}` }});
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 409) { showMsg('Löschen nicht möglich: abhängige Daten vorhanden', false); return; }
+        if (!res.ok || data.success === false) throw new Error(data.message || `HTTP ${res.status}`);
+        showMsg('Veranstalter gelöscht', true);
+        await loadTenants();
+      } catch(e){ showMsg(e.message, false); }
+    }
+
+    async function loadProducts(){
+      try {
+        const res = await fetch(`${AUTH_BASE}/auth/products`);
+        const data = await res.json();
+        const sel = document.getElementById('product_key_member');
+        const ul = document.getElementById('products');
+        sel.innerHTML = '';
+        ul.innerHTML = '';
+        const items = (data.data||[]);
+        items.forEach(p => {
+          const opt = document.createElement('option');
+          opt.value = p.key; opt.textContent = p.name;
+          sel.appendChild(opt);
+          const li = document.createElement('li');
+          li.textContent = `${p.name} (${p.key})`;
+          ul.appendChild(li);
+        });
+        try { sel.value = items.find(x=>x.key==='tickets') ? 'tickets' : (items[0]?.key||''); } catch(_){ }
+      } catch(_){ }
+    }
+
+    async function createProduct(){
+      const t = getToken(); if (!t){ showMsg('Bitte einloggen', false); return; }
+      const key = (document.getElementById('prod_key')?.value||'').trim();
+      const name = (document.getElementById('prod_name')?.value||'').trim();
+      const is_active = !!document.getElementById('prod_active')?.checked;
+      if (!key || !name){ showMsg('Produkt-Key und Name erforderlich', false); return; }
+      try {
+        const res = await fetch(`${AUTH_BASE}/auth/products`, {
+          method:'POST', headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${t}` },
+          body: JSON.stringify({ key, name, is_active })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.message||`HTTP ${res.status}`);
+        showMsg('Produkt angelegt/aktualisiert', true);
+        document.getElementById('prod_key').value='';
+        document.getElementById('prod_name').value='';
+        document.getElementById('prod_active').checked=true;
+        await loadProducts();
+      } catch(e){ showMsg(e.message, false); }
+    }
+
+    async function loadInstances(){
+      const t = getToken(); if (!t){ showMsg('Bitte einloggen', false); return; }
+      try {
+        const res = await fetch(`${AUTH_BASE}/auth/products/instances?owner=me`, { headers:{ Authorization:`Bearer ${t}` }});
+        const data = await res.json();
+        const ul = document.getElementById('instances'); ul.innerHTML='';
+        if (!res.ok || !data.success) throw new Error(data.message||`HTTP ${res.status}`);
+        (data.data||[]).forEach(inst => {
+          const li = document.createElement('li');
+          li.textContent = `${inst.name} (${inst.product_key})`;
+          const manageBtn = document.createElement('button');
+          manageBtn.textContent = 'Lizenzen';
+          manageBtn.style.marginLeft='8px';
+          manageBtn.onclick = () => manageInstanceLicenses(inst.id);
+          ul.appendChild(li);
+          ul.appendChild(manageBtn);
+        });
+        showMsg(`${(data.data||[]).length} Instanzen geladen`, true);
+      } catch(e){ showMsg(e.message, false); }
+    }
+
+    async function createInstance(){
+      const t = getToken(); if (!t){ showMsg('Bitte einloggen', false); return; }
+      const product = (document.getElementById('pi_product')?.value||'').trim();
+      const name = (document.getElementById('pi_name')?.value||'').trim();
+      const tenant_id = parseInt(document.getElementById('pi_tenant')?.value||'') || null;
+      if (!product || !name) { showMsg('Produkt-Key und Name erforderlich', false); return; }
+      try {
+        const res = await fetch(`${AUTH_BASE}/auth/products/instances`, {
+          method:'POST', headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${t}` },
+          body: JSON.stringify({ product, name, tenant_id })
+        });
+        const data = await res.json();
+        if (res.status === 409) { showMsg('Instanz existiert bereits', false); return; }
+        if (!res.ok || !data.success) throw new Error(data.message||`HTTP ${res.status}`);
+        showMsg('Instanz angelegt', true);
+        await loadInstances();
+      } catch(e){ showMsg(e.message, false); }
+    }
+
+    async function manageInstanceLicenses(instanceId){
+      const t = getToken(); if (!t){ showMsg('Bitte einloggen', false); return; }
+      try {
+        const res = await fetch(`${AUTH_BASE}/auth/products/instances/${instanceId}/licenses`, { headers:{ Authorization:`Bearer ${t}` }});
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.message||`HTTP ${res.status}`);
+        const members = (data.data||[]).map(m => `${m.first_name||''} ${m.last_name||''} <${m.email}>`).join('\n') || '(keine)';
+        const action = prompt(`Lizenzen:\n${members}\n\nAktion: 'add <admin_id>' oder 'del <admin_id>'`);
+        if (!action) return;
+        const [cmd, idStr] = action.trim().split(/\s+/);
+        const admin_id = parseInt(idStr||'0',10);
+        if (!admin_id) { showMsg('admin_id erforderlich', false); return; }
+        if (cmd === 'add') {
+          const r = await fetch(`${AUTH_BASE}/auth/products/instances/${instanceId}/licenses`, { method:'POST', headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${t}` }, body: JSON.stringify({ admin_id, status:'active' }) });
+          const dj = await r.json(); if (!r.ok || !dj.success) throw new Error(dj.message||`HTTP ${r.status}`);
+          showMsg('Lizenz zugewiesen', true);
+        } else if (cmd === 'del') {
+          const r = await fetch(`${AUTH_BASE}/auth/products/instances/${instanceId}/licenses?admin_id=${admin_id}`, { method:'DELETE', headers:{ Authorization:`Bearer ${t}` }});
+          const dj = await r.json().catch(()=>({success:true})); if (!r.ok || dj.success === false) throw new Error(dj.message||`HTTP ${r.status}`);
+          showMsg('Lizenz entzogen', true);
+        } else {
+          showMsg('Unbekannte Aktion', false);
+        }
+      } catch(e){ showMsg(e.message, false); }
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      renderAuth();
+      const fromHash = (location.hash||'').replace(/^#/, '');
+      const p = new URLSearchParams(fromHash);
+      const token = p.get('token');
+      if (token){ setToken(token); try{ history.replaceState(null, document.title, location.pathname); }catch(_){} }
+      // Bereits eingeloggte Nutzer: Tenants automatisch laden
+      const t = getToken(); if (t) { try{ loadTenants(); }catch(_){} }
+      // Produkte laden (Select + Liste)
+      loadProducts();
+    });
+  </script>
+</body>
+</html>
+
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Auth-Baustein</title>
+  <link rel="icon" href="data:,">
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin: 24px; }
+    code { background: #f3f4f6; padding: 2px 6px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>Auth‑Baustein</h1>
+  <p>Service läuft. Verwenden Sie die API‑Routen unter <code>/api</code>:</p>
+  <ul>
+    <li><code>/api/auth/oauth/google</code> – Google Login starten</li>
+    <li><code>/api/auth/me</code> – JWT prüfen</li>
+  </ul>
+</body>
+</html>
+
+
