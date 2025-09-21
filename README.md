@@ -1,6 +1,7 @@
 # 🔐 Auth-Baustein
 
-Ein modulares, mehrsprachiges Authentifizierungs-System für moderne Webanwendungen.
+Ein flexibler, wiederverwendbarer Authentifizierungs-Service für moderne Webanwendungen. 
+Dieser Baustein stellt nur die API-Endpunkte zur Verfügung - die Admin-Oberfläche wird in Ihrem Frontend implementiert.
 
 ## 🌍 **Multilingual Support**
 
@@ -24,11 +25,56 @@ Ein modulares, mehrsprachiges Authentifizierungs-System für moderne Webanwendun
 - ✅ **Account-Verification**
 - ✅ **API-Key** Generation
 
+### **Workshop-Management:**
+- ✅ **Workshop-Anmeldungen** verwalten
+- ✅ **Status-Tracking** (angemeldet, bestätigt, storniert, abgeschlossen)
+- ✅ **Benutzer-spezifische** Anmeldungen
+- ✅ **Admin-Übersicht** aller Anmeldungen
+
 ### **Security:**
 - ✅ **bcrypt** Password Hashing
 - ✅ **Helmet** Security Headers
 - ✅ **CORS** Protection
 - ✅ **Rate Limiting** (geplant)
+
+## 🎯 **Frontend-Integration**
+
+### **Admin-Interface in Frontend implementieren:**
+
+Dieser Auth-Baustein stellt nur die API-Endpunkte zur Verfügung. Für die Admin-Verwaltung implementieren Sie bitte ein Frontend-Interface in Ihrem Hauptprojekt.
+
+**Beispiel-Code verfügbar:** `examples/admin-example.tsx`
+
+### **Erforderliche Frontend-Komponenten:**
+1. **Admin-Dashboard** mit Statistiken
+2. **Workshop-Management** mit Filter und Suche
+3. **Benutzer-Verwaltung** mit Rollen
+4. **CSV-Export** für Daten
+5. **Rollen-basierte** Zugriffskontrolle
+
+## 📡 **API-Endpunkte**
+
+### **Authentifizierung:**
+- `GET /api/auth/me` - JWT validieren und Benutzerinfo abrufen
+- `GET /api/auth/oauth/google` - Google OAuth Login starten
+- `GET /api/auth/oauth/google/callback` - OAuth Callback (automatisch)
+
+### **Workshop-Management:**
+- `GET /api/workshops/my-registrations` - Eigene Anmeldungen abrufen
+- `POST /api/workshops/register` - Für Workshop anmelden
+- `PUT /api/workshops/:id` - Anmeldung aktualisieren
+- `DELETE /api/workshops/:id` - Anmeldung stornieren
+- `GET /api/workshops/all` - Alle Anmeldungen (Admin)
+
+### **Tenant-Management (Admin):**
+- `GET /api/auth/tenants` - Alle Organisationen abrufen
+- `POST /api/auth/tenants` - Neue Organisation erstellen
+- `DELETE /api/auth/tenants/:id` - Organisation löschen
+
+### **Benutzer-Management (geplant):**
+- `GET /api/auth/users` - Alle Benutzer abrufen (Admin)
+- `PUT /api/auth/users/:id` - Benutzer aktualisieren
+- `DELETE /api/auth/users/:id` - Benutzer löschen
 
 ## 🏗️ **Architektur**
 
