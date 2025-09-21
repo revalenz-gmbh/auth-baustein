@@ -218,8 +218,13 @@ router.get('/oauth/google/callback', async (req, res) => {
   (function(){
     try {
       var token = ${JSON.stringify(token)};
+      var user = ${JSON.stringify({ id: admin.id, email: admin.email, name: admin.name })};
       if (window.opener) {
-        window.opener.postMessage({ type: 'auth_token', token: token }, ${JSON.stringify(safeOrigin)});
+        window.opener.postMessage({ 
+          type: 'auth_success', 
+          token: token,
+          user: user
+        }, ${JSON.stringify(safeOrigin)});
       }
       // Versuche den Token in die Zwischenablage zu kopieren (als Fallback)
       try {
@@ -227,8 +232,17 @@ router.get('/oauth/google/callback', async (req, res) => {
           navigator.clipboard.writeText(String(token)).catch(function(){});
         }
       } catch(e) {}
-    } catch (e) {}
-    setTimeout(function(){ window.close(); }, 200);
+    } catch (e) {
+      console.error('OAuth callback error:', e);
+    }
+    setTimeout(function(){ 
+      if (window.opener) {
+        window.close(); 
+      } else {
+        // Fallback: Redirect zur Frontend-Seite
+        window.location.href = '${process.env.FRONTEND_URL || 'https://revalenz.de'}';
+      }
+    }, 1000);
   })();
 </script>
 </body></html>`;
@@ -266,18 +280,35 @@ function sendOauthError(req, res, { code = 400, message = 'oauth failed', slug =
       const html = `<!doctype html>
 <html><head><meta charset="utf-8"><title>Login fehlgeschlagen</title></head>
 <body>
-<p>Login fehlgeschlagen. Dieses Fenster wird automatisch geschlossen.</p>
+<p>Login fehlgeschlagen: ${message}</p>
+<p>Dieses Fenster wird automatisch geschlossen.</p>
 <script>
 (function(){
   try {
     if (window.opener) {
-      window.opener.postMessage({ type: 'auth_error', message: ${JSON.stringify(message)}, slug: ${JSON.stringify(slug)} }, ${JSON.stringify(safeOrigin)});
+      window.opener.postMessage({ 
+        type: 'auth_error', 
+        message: ${JSON.stringify(message)}, 
+        slug: ${JSON.stringify(slug)},
+        code: ${code}
+      }, ${JSON.stringify(safeOrigin)});
     }
     if (${JSON.stringify(!!returnUrl)}) {
-      try { window.location.replace(${JSON.stringify(returnUrl)} + '#error=' + encodeURIComponent(${JSON.stringify(slug || 'oauth_failed')})); } catch(e) {}
+      try { 
+        window.location.replace(${JSON.stringify(returnUrl)} + '#error=' + encodeURIComponent(${JSON.stringify(slug || 'oauth_failed')})); 
+      } catch(e) {}
     }
-  } catch (e) {}
-  setTimeout(function(){ window.close(); }, 300);
+  } catch (e) {
+    console.error('OAuth error handling failed:', e);
+  }
+  setTimeout(function(){ 
+    if (window.opener) {
+      window.close(); 
+    } else {
+      // Fallback: Redirect zur Frontend-Seite
+      window.location.href = '${process.env.FRONTEND_URL || 'https://revalenz.de'}';
+    }
+  }, 2000);
 })();
 </script>
 </body></html>`;
