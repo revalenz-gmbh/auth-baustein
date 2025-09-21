@@ -19,3 +19,29 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+⚠️ IMPORTANT SECURITY DISCLAIMER ⚠️
+
+AUTHENTICATION IS AN EXTREMELY SENSITIVE SECURITY AREA. 
+
+THE REVALENZ GMBH ASSUMES NO LIABILITY FOR:
+- Correct functionality of the system
+- Security or protection against attacks
+- Suitability for specific use cases
+- Availability or downtime
+- Data loss or data leaks
+- Compliance with security standards
+- Damages from faulty implementation
+
+BEFORE PRODUCTION USE, YOU MUST:
+1. Conduct your own security audits
+2. Perform penetration tests
+3. Code review with security experts
+4. Load testing for performance
+5. Implement backup strategies
+6. Set up monitoring and logging
+7. Plan updates and patches
+
+USE OF THIS SYSTEM IS AT YOUR OWN RISK. The Revalenz GmbH is not liable for any direct, indirect, incidental, or consequential damages arising from the use or inability to use this system.

@@ -1,5 +1,7 @@
 # 🤖 KI-Entwicklung des Auth-Bausteins
 
+> ⚠️ **WICHTIGER HAFTUNGSAUSSCHLUSS**: Die Revalenz GmbH übernimmt keine Haftung für die korrekte Funktionsfähigkeit, Sicherheit oder Eignung dieses Systems. Authentifizierung ist ein kritischer Sicherheitsbereich - führen Sie eigene Sicherheitsaudits durch und testen Sie das System gründlich vor dem produktiven Einsatz.
+
 ## 🎯 **Über dieses Projekt**
 
 Der Auth-Baustein wurde vollständig mit Unterstützung von KI-Agenten entwickelt und demonstriert, wie moderne Software-Entwicklung durch KI-Tools revolutioniert wird.

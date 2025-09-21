@@ -5,6 +5,10 @@ Dieser Baustein stellt nur die API-Endpunkte zur Verfügung - die Admin-Oberflä
 
 > 🤖 **KI-Entwicklung**: Dieses Projekt wurde mit Unterstützung von KI-Agenten entwickelt und zeigt, wie moderne Software-Entwicklung mit KI-Tools effizienter und qualitativ hochwertiger wird.
 
+> ⚠️ **WICHTIGER HAFTUNGSAUSSCHLUSS**: Die Revalenz GmbH übernimmt keine Haftung für die korrekte Funktionsfähigkeit, Sicherheit oder Eignung dieses Systems für bestimmte Zwecke. Die Nutzung erfolgt auf eigene Gefahr. Authentifizierung ist ein kritischer Sicherheitsbereich - führen Sie eigene Sicherheitsaudits durch und testen Sie das System gründlich vor dem produktiven Einsatz.
+> 
+> 📋 **Vollständiger Haftungsausschluss**: Siehe [DISCLAIMER.md](./DISCLAIMER.md) für detaillierte Informationen.
+
 ## 🌍 **Multilingual Support**
 
 - **Deutsch** (Deutschland)
@@ -424,6 +428,44 @@ FRONTEND_URL=https://revalenz.de
 
 MIT License - Siehe [LICENSE](LICENSE) für Details.
 
+## ⚠️ **HAFTUNGSAUSSCHLUSS**
+
+### **🔒 Sicherheitshinweise**
+
+**KRITISCH**: Authentifizierung ist ein extrem sensibler Sicherheitsbereich. Die Revalenz GmbH übernimmt **KEINE HAFTUNG** für:
+
+- ❌ **Korrekte Funktionsfähigkeit** des Systems
+- ❌ **Sicherheit** oder Schutz vor Angriffen
+- ❌ **Eignung** für bestimmte Anwendungsfälle
+- ❌ **Verfügbarkeit** oder Ausfallzeiten
+- ❌ **Datenverlust** oder Datenlecks
+- ❌ **Compliance** mit Sicherheitsstandards
+- ❌ **Schäden** durch fehlerhafte Implementierung
+
+### **🛡️ Empfohlene Maßnahmen**
+
+Vor dem produktiven Einsatz **MÜSSEN** Sie:
+
+1. ✅ **Eigene Sicherheitsaudits** durchführen
+2. ✅ **Penetrationstests** durchführen
+3. ✅ **Code-Review** mit Sicherheitsexperten
+4. ✅ **Load-Testing** für Performance
+5. ✅ **Backup-Strategien** implementieren
+6. ✅ **Monitoring** und Logging einrichten
+7. ✅ **Updates** und Patches planen
+
+### **📋 Verantwortung des Nutzers**
+
+- 🔍 **Eigene Prüfung** der Sicherheit
+- 🧪 **Umfassende Tests** vor Produktion
+- 🔒 **Sichere Konfiguration** der Umgebung
+- 📊 **Regelmäßige Updates** und Wartung
+- 🚨 **Monitoring** von Sicherheitsereignissen
+
+### **⚖️ Rechtlicher Hinweis**
+
+Die Nutzung dieses Systems erfolgt **ausschließlich auf eigene Gefahr**. Die Revalenz GmbH haftet nicht für direkte, indirekte, zufällige oder Folgeschäden, die durch die Nutzung oder Unfähigkeit zur Nutzung dieses Systems entstehen.
+
 ---
 
-**Teil des Revalenz Bausteine-Systems** 🧩
+**Teil des Revalenz Bausteine-Systems** 🧩 - **Nutzung auf eigene Gefahr**

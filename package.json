@@ -1,7 +1,7 @@
 {
   "name": "@revalenz/auth-baustein",
   "version": "1.0.0",
-  "description": "Flexibler, wiederverwendbarer Authentifizierungs-Service für moderne Webanwendungen. Entwickelt mit KI-Unterstützung.",
+  "description": "Flexibler, wiederverwendbarer Authentifizierungs-Service für moderne Webanwendungen. Entwickelt mit KI-Unterstützung. ⚠️ HAFTUNGSAUSSCHLUSS: Keine Haftung für Sicherheit oder Funktionsfähigkeit - Nutzung auf eigene Gefahr.",
   "type": "module",
   "main": "src/index.js",
   "keywords": [

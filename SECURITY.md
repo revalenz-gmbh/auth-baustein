@@ -1,5 +1,7 @@
 # 🔒 Security Policy
 
+> ⚠️ **WICHTIGER HAFTUNGSAUSSCHLUSS**: Die Revalenz GmbH übernimmt keine Haftung für die Sicherheit dieses Authentifizierungssystems. Führen Sie eigene Sicherheitsaudits durch und testen Sie das System gründlich vor dem produktiven Einsatz.
+
 ## 🛡️ **Supported Versions**
 
 Wir unterstützen die folgenden Versionen mit Sicherheitsupdates:

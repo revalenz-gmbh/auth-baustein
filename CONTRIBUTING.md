@@ -4,6 +4,8 @@ Vielen Dank für Ihr Interesse am Auth-Baustein! Wir freuen uns über Beiträge 
 
 > 🤖 **KI-Entwicklung**: Dieses Projekt wurde mit Unterstützung von KI-Agenten entwickelt. Wir ermutigen auch Contributors, KI-Tools für ihre Beiträge zu nutzen - es macht die Entwicklung effizienter und qualitativ hochwertiger!
 
+> ⚠️ **HAFTUNGSAUSSCHLUSS**: Die Revalenz GmbH übernimmt keine Haftung für die korrekte Funktionsfähigkeit, Sicherheit oder Eignung dieses Systems. Authentifizierung ist ein kritischer Sicherheitsbereich - alle Contributors müssen eigene Sicherheitsaudits durchführen.
+
 ## 📋 **Beitragsrichtlinien**
 
 ### **🎯 Was wir begrüßen:**
