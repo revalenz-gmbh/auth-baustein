@@ -1,0 +1,113 @@
+name: ✨ Feature Request
+description: Schlagen Sie ein neues Feature vor
+title: "[FEATURE]: "
+labels: ["enhancement", "needs-triage"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Vielen Dank für Ihren Feature-Vorschlag! Bitte beschreiben Sie Ihr Feature so detailliert wie möglich.
+
+  - type: textarea
+    id: feature-description
+    attributes:
+      label: ✨ Feature-Beschreibung
+      description: Eine klare und präzise Beschreibung des gewünschten Features
+      placeholder: Beschreiben Sie, was Sie sich wünschen...
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem-statement
+    attributes:
+      label: 🎯 Problem/Use Case
+      description: Welches Problem löst dieses Feature?
+      placeholder: Beschreiben Sie das Problem oder den Use Case...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: 💡 Vorgeschlagene Lösung
+      description: Wie soll das Feature implementiert werden?
+      placeholder: Beschreiben Sie Ihre Idee für die Implementierung...
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 🔄 Alternative Lösungen
+      description: Welche Alternativen haben Sie bereits in Betracht gezogen?
+      placeholder: Beschreiben Sie alternative Ansätze...
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: 🚀 Priorität
+      description: Wie wichtig ist dieses Feature?
+      options:
+        - Kritisch (Blockiert andere Features)
+        - Hoch (Wichtige Verbesserung)
+        - Mittel (Nützliche Ergänzung)
+        - Niedrig (Nice-to-have)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: complexity
+    attributes:
+      label: 🧩 Komplexität
+      description: Wie komplex ist die Implementierung?
+      options:
+        - Einfach (1-2 Tage)
+        - Mittel (1-2 Wochen)
+        - Komplex (1+ Monat)
+        - Sehr komplex (Mehrere Monate)
+    validations:
+      required: true
+
+  - type: textarea
+    id: api-changes
+    attributes:
+      label: 🔌 API-Änderungen
+      description: Erfordert dieses Feature Änderungen an der API?
+      placeholder: Beschreiben Sie eventuelle API-Änderungen...
+
+  - type: textarea
+    id: breaking-changes
+    attributes:
+      label: ⚠️ Breaking Changes
+      description: Würde dieses Feature Breaking Changes verursachen?
+      placeholder: Beschreiben Sie eventuelle Breaking Changes...
+
+  - type: textarea
+    id: examples
+    attributes:
+      label: 📝 Beispiele
+      description: Code-Beispiele oder Mockups
+      placeholder: Fügen Sie hier Beispiele ein...
+      render: markdown
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: 📋 Zusätzlicher Kontext
+      description: Weitere Informationen, Links, Referenzen
+      placeholder: Links zu ähnlichen Features, Dokumentation, etc.
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: ✅ Checkliste
+      description: Bitte bestätigen Sie folgende Punkte
+      options:
+        - label: Ich habe die Dokumentation gelesen
+          required: true
+        - label: Ich habe nach ähnlichen Issues gesucht
+          required: true
+        - label: Ich bin bereit, bei der Implementierung zu helfen
+          required: false

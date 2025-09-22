@@ -1,0 +1,110 @@
+name: 🐛 Bug Report
+description: Melden Sie einen Bug oder ein Problem
+title: "[BUG]: "
+labels: ["bug", "needs-triage"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Vielen Dank für Ihre Meldung! Bitte füllen Sie alle relevanten Felder aus.
+
+  - type: textarea
+    id: bug-description
+    attributes:
+      label: 🐛 Bug-Beschreibung
+      description: Eine klare und präzise Beschreibung des Bugs
+      placeholder: Beschreiben Sie, was passiert ist...
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps-to-reproduce
+    attributes:
+      label: 🔄 Schritte zur Reproduktion
+      description: Schritte, um das Problem zu reproduzieren
+      placeholder: |
+        1. Gehen Sie zu '...'
+        2. Klicken Sie auf '...'
+        3. Scrollen Sie nach unten zu '...'
+        4. Sehen Sie den Fehler
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: ✅ Erwartetes Verhalten
+      description: Was hätte passieren sollen?
+      placeholder: Beschreiben Sie das erwartete Verhalten...
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual-behavior
+    attributes:
+      label: ❌ Tatsächliches Verhalten
+      description: Was ist tatsächlich passiert?
+      placeholder: Beschreiben Sie das tatsächliche Verhalten...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: 🚨 Schweregrad
+      description: Wie schwerwiegend ist dieser Bug?
+      options:
+        - Kritisch (System nicht nutzbar)
+        - Hoch (Wichtige Funktion betroffen)
+        - Mittel (Funktion eingeschränkt)
+        - Niedrig (Kleinere Probleme)
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: 🌍 Umgebung
+      description: In welcher Umgebung tritt der Bug auf?
+      placeholder: z.B. Production, Development, Docker, etc.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: 📦 Version
+      description: Welche Version verwenden Sie?
+      placeholder: z.B. v1.2.3
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 📋 Logs/Fehlermeldungen
+      description: Relevante Logs oder Fehlermeldungen
+      placeholder: Fügen Sie hier Logs oder Fehlermeldungen ein...
+      render: shell
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: 📝 Zusätzlicher Kontext
+      description: Weitere Informationen, die helfen könnten
+      placeholder: Screenshots, Links, etc.
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: ✅ Checkliste
+      description: Bitte bestätigen Sie folgende Punkte
+      options:
+        - label: Ich habe die Dokumentation gelesen
+          required: true
+        - label: Ich habe nach ähnlichen Issues gesucht
+          required: true
+        - label: Ich kann das Problem reproduzieren
+          required: true

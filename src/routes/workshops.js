@@ -1,11 +1,11 @@
 import express from 'express';
-import { authenticateToken } from '../middleware/auth.js';
-import { db } from '../utils/db.js';
+import { verifyJWT } from '../middleware/auth.js';
+import { query } from '../utils/db.js';
 
 const router = express.Router();
 
 // Workshop-Anmeldung erstellen
-router.post('/register', authenticateToken, async (req, res) => {
+router.post('/register', verifyJWT, async (req, res) => {
   try {
     const { 
       workshopDate, 
@@ -15,7 +15,7 @@ router.post('/register', authenticateToken, async (req, res) => {
       message 
     } = req.body;
 
-    const userId = req.user.id;
+    const userId = req.user.sub;
 
     // Validierung
     if (!workshopDate) {
@@ -33,7 +33,7 @@ router.post('/register', authenticateToken, async (req, res) => {
     }
 
     // Prüfen ob bereits für diesen Termin angemeldet
-    const existingRegistration = await db.query(
+    const existingRegistration = await query(
       'SELECT id FROM workshop_registrations WHERE user_id = $1 AND workshop_date = $2',
       [userId, workshopDate]
     );
@@ -46,7 +46,7 @@ router.post('/register', authenticateToken, async (req, res) => {
     }
 
     // Workshop-Anmeldung erstellen
-    const result = await db.query(
+    const result = await query(
       `INSERT INTO workshop_registrations 
        (user_id, workshop_type, workshop_date, company, experience, goals, message, status)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -91,11 +91,11 @@ router.post('/register', authenticateToken, async (req, res) => {
 });
 
 // Workshop-Anmeldungen eines Benutzers abrufen
-router.get('/my-registrations', authenticateToken, async (req, res) => {
+router.get('/my-registrations', verifyJWT, async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = req.user.sub;
 
-    const result = await db.query(
+    const result = await query(
       `SELECT 
         wr.*,
         u.name as user_name,
@@ -140,14 +140,14 @@ router.get('/my-registrations', authenticateToken, async (req, res) => {
 });
 
 // Workshop-Anmeldung aktualisieren
-router.put('/:id', authenticateToken, async (req, res) => {
+router.put('/:id', verifyJWT, async (req, res) => {
   try {
     const registrationId = req.params.id;
-    const userId = req.user.id;
+    const userId = req.user.sub;
     const { company, experience, goals, message } = req.body;
 
     // Prüfen ob die Anmeldung dem Benutzer gehört
-    const existingRegistration = await db.query(
+    const existingRegistration = await query(
       'SELECT * FROM workshop_registrations WHERE id = $1 AND user_id = $2',
       [registrationId, userId]
     );
@@ -160,7 +160,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
     }
 
     // Anmeldung aktualisieren
-    const result = await db.query(
+    const result = await query(
       `UPDATE workshop_registrations 
        SET company = $1, experience = $2, goals = $3, message = $4, updated_at = CURRENT_TIMESTAMP
        WHERE id = $5 AND user_id = $6
@@ -196,13 +196,13 @@ router.put('/:id', authenticateToken, async (req, res) => {
 });
 
 // Workshop-Anmeldung stornieren
-router.delete('/:id', authenticateToken, async (req, res) => {
+router.delete('/:id', verifyJWT, async (req, res) => {
   try {
     const registrationId = req.params.id;
-    const userId = req.user.id;
+    const userId = req.user.sub;
 
     // Prüfen ob die Anmeldung dem Benutzer gehört
-    const existingRegistration = await db.query(
+    const existingRegistration = await query(
       'SELECT * FROM workshop_registrations WHERE id = $1 AND user_id = $2',
       [registrationId, userId]
     );
@@ -215,7 +215,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     }
 
     // Anmeldung stornieren (Status auf cancelled setzen)
-    await db.query(
+    await query(
       'UPDATE workshop_registrations SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
       ['cancelled', registrationId]
     );
@@ -236,17 +236,17 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 });
 
 // Alle Workshop-Anmeldungen abrufen (Admin-Funktion)
-router.get('/all', authenticateToken, async (req, res) => {
+router.get('/all', verifyJWT, async (req, res) => {
   try {
     // Prüfen ob Benutzer Admin ist
-    if (req.user.role !== 'ADMIN') {
+    if (!req.user.roles || !req.user.roles.includes('admin')) {
       return res.status(403).json({
         success: false,
         message: 'Zugriff verweigert. Admin-Berechtigung erforderlich.'
       });
     }
 
-    const result = await db.query(
+    const result = await query(
       `SELECT 
         wr.*,
         u.name as user_name,

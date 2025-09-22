@@ -5,10 +5,13 @@ await initSchema();
 const app = buildApp();
 
 export default function handler(req, res) {
-  // Vercel liefert Pfade inkl. "/api" – für Express entfernen
+  // Vercel liefert Pfade inkl. "/api" oder "/auth" – für Express anpassen
   try {
     if (req.url && req.url.startsWith('/api/')) {
       req.url = req.url.replace(/^\/api/, '');
+    } else if (req.url && req.url.startsWith('/auth/')) {
+      // /auth/ Routes direkt verwenden (keine Änderung nötig)
+      // Express erwartet /auth/oauth/google/callback
     } else if (req.url === '/api') {
       req.url = '/';
     }
