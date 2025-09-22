@@ -16,7 +16,18 @@ const createTransporter = () => {
     });
   }
   
-  // Für Produktion: Mailgun EU
+  // Für Produktion: SendGrid EU (empfohlen)
+  if (process.env.SENDGRID_API_KEY) {
+    return nodemailer.createTransporter({
+      service: 'SendGrid',
+      auth: {
+        user: 'apikey',
+        pass: process.env.SENDGRID_API_KEY
+      }
+    });
+  }
+  
+  // Fallback: Mailgun EU
   if (process.env.MAILGUN_EU_API_KEY) {
     return nodemailer.createTransporter({
       host: 'smtp.eu.mailgun.org',
@@ -29,12 +40,14 @@ const createTransporter = () => {
     });
   }
   
-  // Fallback: SendGrid
+  // Letzter Fallback: Gmail SMTP
   return nodemailer.createTransporter({
-    service: 'SendGrid',
+    host: 'smtp.gmail.com',
+    port: 587,
+    secure: false,
     auth: {
-      user: 'apikey',
-      pass: process.env.SENDGRID_API_KEY
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS
     }
   });
 };
