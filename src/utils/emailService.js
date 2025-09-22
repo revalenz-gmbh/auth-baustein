@@ -3,8 +3,17 @@ import crypto from 'crypto';
 
 // Email-Transporter konfigurieren
 const createTransporter = () => {
+  console.log('Email config check:', {
+    NODE_ENV: process.env.NODE_ENV,
+    SMTP_USER: process.env.SMTP_USER ? 'SET' : 'NOT_SET',
+    SENDGRID_API_KEY: process.env.SENDGRID_API_KEY ? 'SET' : 'NOT_SET',
+    MAILGUN_EU_API_KEY: process.env.MAILGUN_EU_API_KEY ? 'SET' : 'NOT_SET',
+    FROM_EMAIL: process.env.FROM_EMAIL
+  });
+
   // Für Entwicklung: SMTP (Gmail)
   if (process.env.NODE_ENV === 'development' || process.env.SMTP_USER) {
+    console.log('Using SMTP configuration');
     return nodemailer.createTransport({
       host: process.env.SMTP_HOST || 'smtp.gmail.com',
       port: process.env.SMTP_PORT || 587,
@@ -18,6 +27,7 @@ const createTransporter = () => {
   
   // Für Produktion: SendGrid EU (empfohlen)
   if (process.env.SENDGRID_API_KEY) {
+    console.log('Using SendGrid configuration');
     return nodemailer.createTransport({
       service: 'SendGrid',
       auth: {
@@ -29,6 +39,7 @@ const createTransporter = () => {
   
   // Fallback: Mailgun EU
   if (process.env.MAILGUN_EU_API_KEY) {
+    console.log('Using Mailgun configuration');
     return nodemailer.createTransport({
       host: 'smtp.eu.mailgun.org',
       port: 587,
@@ -41,6 +52,7 @@ const createTransporter = () => {
   }
   
   // Letzter Fallback: Gmail SMTP
+  console.log('Using Gmail fallback configuration');
   return nodemailer.createTransport({
     host: 'smtp.gmail.com',
     port: 587,
@@ -60,9 +72,11 @@ export const generateVerificationToken = () => {
 // Verifizierungs-Email senden
 export const sendVerificationEmail = async (email, name, token) => {
   try {
+    console.log(`Attempting to send verification email to: ${email}`);
     const transporter = createTransporter();
     
     const verificationUrl = `${process.env.FRONTEND_URL || 'https://revalenz.de'}/verify-email?token=${token}`;
+    console.log(`Verification URL: ${verificationUrl}`);
     
     const mailOptions = {
       from: process.env.FROM_EMAIL || 'noreply@revalenz.de',
