@@ -7,7 +7,7 @@
  * Voraussetzungen:
  * - React/TypeScript Frontend
  * - Shadcn/ui Komponenten (oder ähnliche UI-Bibliothek)
- * - API-Service für HTTP-Requests
+ * - API-Service für HTTP-Requests .
  */
 
 import React, { useState, useEffect } from 'react';
