@@ -1257,3 +1257,50 @@ router.get('/user-status', async (req, res) => {
     });
   }
 });
+
+// Test-Endpoint für E-Mail-Versand (nur für Entwicklung)
+router.post('/test-email', async (req, res) => {
+  try {
+    // Nur in Entwicklung erlauben
+    if (process.env.NODE_ENV === 'production') {
+      return res.status(403).json({
+        success: false,
+        message: 'Test-Endpoint nur in Entwicklung verfügbar'
+      });
+    }
+
+    const { email } = req.body;
+    
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: 'E-Mail-Adresse erforderlich'
+      });
+    }
+
+    // Test-E-Mail senden
+    const testToken = generateVerificationToken();
+    const emailResult = await sendVerificationEmail(email, 'Test User', testToken);
+    
+    if (emailResult.success) {
+      return res.json({
+        success: true,
+        message: 'Test-E-Mail erfolgreich gesendet',
+        messageId: emailResult.messageId
+      });
+    } else {
+      return res.status(500).json({
+        success: false,
+        message: 'E-Mail konnte nicht gesendet werden',
+        error: emailResult.error
+      });
+    }
+    
+  } catch (error) {
+    console.error('Test email error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Fehler beim Senden der Test-E-Mail'
+    });
+  }
+});

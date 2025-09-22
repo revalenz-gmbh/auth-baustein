@@ -3,8 +3,8 @@ import crypto from 'crypto';
 
 // Email-Transporter konfigurieren
 const createTransporter = () => {
-  // Für Entwicklung: SMTP oder SendGrid
-  if (process.env.NODE_ENV === 'development') {
+  // Für Entwicklung: SMTP (Gmail)
+  if (process.env.NODE_ENV === 'development' || process.env.SMTP_USER) {
     return nodemailer.createTransporter({
       host: process.env.SMTP_HOST || 'smtp.gmail.com',
       port: process.env.SMTP_PORT || 587,
@@ -16,7 +16,20 @@ const createTransporter = () => {
     });
   }
   
-  // Für Produktion: SendGrid oder andere Services
+  // Für Produktion: Mailgun EU
+  if (process.env.MAILGUN_EU_API_KEY) {
+    return nodemailer.createTransporter({
+      host: 'smtp.eu.mailgun.org',
+      port: 587,
+      secure: false,
+      auth: {
+        user: process.env.MAILGUN_EU_API_KEY,
+        pass: process.env.MAILGUN_EU_API_KEY
+      }
+    });
+  }
+  
+  // Fallback: SendGrid
   return nodemailer.createTransporter({
     service: 'SendGrid',
     auth: {
