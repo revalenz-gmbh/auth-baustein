@@ -2,6 +2,7 @@ import express from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { query } from '../utils/db.js';
+import { generateVerificationToken, sendVerificationEmail, sendWelcomeEmail } from '../utils/emailService.js';
 
 const router = express.Router();
 
@@ -26,6 +27,7 @@ function signToken(admin, tenants){
   );
 }
 
+// Admin-Registrierung (mit Setup-Token)
 router.post('/register', async (req, res) => {
   try {
     const setup = req.headers['x-setup-token'];
@@ -44,6 +46,82 @@ router.post('/register', async (req, res) => {
   } catch (e) {
     console.error(e);
     return res.status(500).json({ success: false, message: 'register failed' });
+  }
+});
+
+// User-Registrierung (öffentlich, mit Email-Verifizierung)
+router.post('/register-user', async (req, res) => {
+  try {
+    const { name, email, password, company, privacy_consent, newsletter_consent } = req.body || {};
+    
+    // Validierung
+    if (!email || !password || !name) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Name, E-Mail und Passwort sind erforderlich' 
+      });
+    }
+    
+    if (!privacy_consent) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Datenschutz-Zustimmung ist erforderlich' 
+      });
+    }
+    
+    // E-Mail bereits vorhanden?
+    const existingUser = await query('SELECT id FROM users WHERE email = $1', [email]);
+    if (existingUser.rowCount > 0) {
+      return res.status(409).json({ 
+        success: false, 
+        message: 'E-Mail-Adresse bereits registriert' 
+      });
+    }
+    
+    // Passwort hashen
+    const hash = await bcrypt.hash(password, 10);
+    
+    // Verifizierungs-Token generieren
+    const verificationToken = generateVerificationToken();
+    const tokenExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 Stunden
+    
+    // User erstellen
+    const result = await query(
+      `INSERT INTO users (name, email, password_hash, company, role, status, email_verified, verification_token, verification_token_expires_at, privacy_consent, privacy_consent_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       RETURNING id, name, email, company, role, status, created_at`,
+      [name, email, hash, company || null, 'CLIENT', 'pending', false, verificationToken, tokenExpiresAt, true, new Date()]
+    );
+    
+    const user = result.rows[0];
+    
+    // Verifizierungs-Email senden
+    try {
+      await sendVerificationEmail(email, name, verificationToken);
+      console.log(`Verification email sent to ${email}`);
+    } catch (emailError) {
+      console.error('Failed to send verification email:', emailError);
+      // Email-Fehler sollte die Registrierung nicht blockieren
+    }
+    
+    return res.json({ 
+      success: true, 
+      message: 'Registrierung erfolgreich. Bitte überprüfen Sie Ihre E-Mails.',
+      data: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        company: user.company,
+        status: user.status
+      }
+    });
+    
+  } catch (error) {
+    console.error('User registration error:', error);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Registrierung fehlgeschlagen' 
+    });
   }
 });
 
@@ -185,16 +263,28 @@ router.get('/oauth/google/callback', async (req, res) => {
         );
         admin = upd.rows[0];
       } else {
-        // 3) Neu anlegen
+        // 3) Neu anlegen - zunächst als 'pending' für Email-Verifizierung
+        const verificationToken = generateVerificationToken();
+        const tokenExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 Stunden
+        
         const ins = await query(
-          `INSERT INTO users (name, email, provider, provider_id, role, status)
-           VALUES ($1,$2,'google',$3,'CLIENT','active')
+          `INSERT INTO users (name, email, provider, provider_id, role, status, email_verified, verification_token, verification_token_expires_at, privacy_consent)
+           VALUES ($1,$2,'google',$3,'CLIENT','pending',$4,$5,$6,$7)
            ON CONFLICT (provider, provider_id)
            DO UPDATE SET name=EXCLUDED.name, email=EXCLUDED.email
-           RETURNING id, email`,
-          [user.name || user.email, user.email, user.sub]
+           RETURNING id, email, name`,
+          [user.name || user.email, user.email, user.sub, false, verificationToken, tokenExpiresAt, true]
         );
         admin = ins.rows[0];
+        
+        // Verifizierungs-Email senden
+        try {
+          await sendVerificationEmail(user.email, user.name || user.email, verificationToken);
+          console.log(`Verification email sent to ${user.email}`);
+        } catch (emailError) {
+          console.error('Failed to send verification email:', emailError);
+          // Email-Fehler sollte den OAuth-Flow nicht blockieren
+        }
       }
     }
 
@@ -931,5 +1021,239 @@ router.get('/tenants/:tenantId/entitlements/members/:adminId', async (req, res) 
     return res.json({ success:true, data: r.rows });
   } catch (e) {
     return res.status(500).json({ success:false, message:'read member entitlements failed' });
+  }
+});
+
+// ============================================================================
+// EMAIL-VERIFIKATION ENDPOINTS
+// ============================================================================
+
+// Email-Verifizierung durchführen
+router.get('/verify-email', async (req, res) => {
+  try {
+    const { token } = req.query;
+    
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        message: 'Verifizierungs-Token fehlt'
+      });
+    }
+    
+    // Token validieren und User verifizieren
+    const result = await query(
+      `SELECT verify_user_email($1, $2, $3) as result`,
+      [token, req.ip, req.get('User-Agent')]
+    );
+    
+    if (result.rows.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Token ungültig oder abgelaufen'
+      });
+    }
+    
+    const verificationResult = result.rows[0].result;
+    
+    if (!verificationResult.success) {
+      return res.status(400).json({
+        success: false,
+        message: verificationResult.message
+      });
+    }
+    
+    // Willkommens-Email senden
+    try {
+      const userResult = await query(
+        'SELECT name, email FROM users WHERE id = $1',
+        [verificationResult.user_id]
+      );
+      
+      if (userResult.rows.length > 0) {
+        const user = userResult.rows[0];
+        await sendWelcomeEmail(user.email, user.name);
+        console.log(`Welcome email sent to ${user.email}`);
+      }
+    } catch (emailError) {
+      console.error('Failed to send welcome email:', emailError);
+      // Email-Fehler sollte die Verifizierung nicht blockieren
+    }
+    
+    // HTML-Seite für erfolgreiche Verifizierung
+    const html = `<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>E-Mail erfolgreich verifiziert - Revalenz</title>
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { background-color: #1e40af; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }
+        .content { background-color: #f8fafc; padding: 30px; border-radius: 0 0 8px 8px; text-align: center; }
+        .success { color: #059669; font-size: 24px; margin: 20px 0; }
+        .button { display: inline-block; background-color: #1e40af; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin: 20px 0; }
+        .logo { max-width: 150px; height: auto; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <img src="${process.env.FRONTEND_URL || 'https://revalenz.de'}/logo-revalenzblau.png" alt="Revalenz" class="logo">
+        <h1>E-Mail erfolgreich verifiziert!</h1>
+    </div>
+    <div class="content">
+        <div class="success">✅</div>
+        <h2>Herzlichen Glückwunsch!</h2>
+        <p>Ihre E-Mail-Adresse wurde erfolgreich verifiziert. Ihr Konto ist jetzt vollständig aktiviert.</p>
+        <p>Sie können jetzt alle Services von Revalenz nutzen:</p>
+        <ul style="text-align: left; display: inline-block;">
+            <li>🚀 KIckstart Workshop anmelden</li>
+            <li>💡 Innovationsberatung buchen</li>
+            <li>🛠️ Baukasten-System nutzen</li>
+        </ul>
+        <div>
+            <a href="${process.env.FRONTEND_URL || 'https://revalenz.de'}" class="button">Zur Revalenz-Website</a>
+        </div>
+        <p><small>Diese Seite wird automatisch in 10 Sekunden weitergeleitet...</small></p>
+    </div>
+    <script>
+        setTimeout(function() {
+            window.location.href = '${process.env.FRONTEND_URL || 'https://revalenz.de'}';
+        }, 10000);
+    </script>
+</body>
+</html>`;
+    
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.send(html);
+    
+  } catch (error) {
+    console.error('Email verification error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Verifizierung fehlgeschlagen'
+    });
+  }
+});
+
+// Verifizierungs-Email erneut senden
+router.post('/resend-verification', async (req, res) => {
+  try {
+    const { email } = req.body;
+    
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: 'E-Mail-Adresse erforderlich'
+      });
+    }
+    
+    // User finden
+    const userResult = await query(
+      'SELECT id, email, name, email_verified, verification_token_expires_at FROM users WHERE email = $1',
+      [email]
+    );
+    
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Benutzer nicht gefunden'
+      });
+    }
+    
+    const user = userResult.rows[0];
+    
+    // Bereits verifiziert?
+    if (user.email_verified) {
+      return res.status(400).json({
+        success: false,
+        message: 'E-Mail-Adresse bereits verifiziert'
+      });
+    }
+    
+    // Neuen Token generieren (falls der alte abgelaufen ist)
+    let verificationToken = user.verification_token;
+    let tokenExpiresAt = user.verification_token_expires_at;
+    
+    if (!verificationToken || new Date(tokenExpiresAt) < new Date()) {
+      verificationToken = generateVerificationToken();
+      tokenExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 Stunden
+      
+      await query(
+        'UPDATE users SET verification_token = $1, verification_token_expires_at = $2 WHERE id = $3',
+        [verificationToken, tokenExpiresAt, user.id]
+      );
+    }
+    
+    // Verifizierungs-Email senden
+    const emailResult = await sendVerificationEmail(user.email, user.name, verificationToken);
+    
+    if (!emailResult.success) {
+      return res.status(500).json({
+        success: false,
+        message: 'E-Mail konnte nicht gesendet werden'
+      });
+    }
+    
+    return res.json({
+      success: true,
+      message: 'Verifizierungs-E-Mail wurde erneut gesendet'
+    });
+    
+  } catch (error) {
+    console.error('Resend verification error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Fehler beim Senden der E-Mail'
+    });
+  }
+});
+
+// User-Status prüfen (für Frontend)
+router.get('/user-status', async (req, res) => {
+  try {
+    const auth = req.headers.authorization || '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+    
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: 'Token erforderlich'
+      });
+    }
+    
+    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
+    
+    const userResult = await query(
+      'SELECT id, email, name, email_verified, status, role FROM users WHERE id = $1',
+      [payload.sub]
+    );
+    
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Benutzer nicht gefunden'
+      });
+    }
+    
+    const user = userResult.rows[0];
+    
+    return res.json({
+      success: true,
+      data: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        email_verified: user.email_verified,
+        status: user.status,
+        role: user.role
+      }
+    });
+    
+  } catch (error) {
+    console.error('User status check error:', error);
+    return res.status(401).json({
+      success: false,
+      message: 'Ungültiger Token'
+    });
   }
 });
