@@ -238,7 +238,12 @@ router.get('/oauth/google/callback', async (req, res) => {
     const allowedDomain = (process.env.ALLOWED_DOMAIN || '').trim();
     const superUser = (process.env.SUPER_ADMIN_EMAIL || '').trim().toLowerCase();
     const userEmail = String(user.email).toLowerCase();
-    if (allowedDomain && !userEmail.endsWith(`@${allowedDomain.toLowerCase()}`) && userEmail !== superUser) {
+    
+    // Prüfe ob User bereits existiert
+    const existingUser = await query('SELECT * FROM users WHERE email = $1', [user.email]);
+    
+    // Domain-Restriction nur für bestehende User anwenden
+    if (existingUser.rowCount > 0 && allowedDomain && !userEmail.endsWith(`@${allowedDomain.toLowerCase()}`) && userEmail !== superUser) {
       // Zusätzlich prüfen: steht E-Mail in allowed_admins?
       const allow = await query('SELECT 1 FROM allowed_admins WHERE LOWER(email)=LOWER($1) LIMIT 1', [user.email]);
       if (allow.rowCount === 0) {
@@ -289,7 +294,17 @@ router.get('/oauth/google/callback', async (req, res) => {
     }
 
     const tenants = await fetchTenantsForAdmin(admin.id);
-    const roles = (userEmail === superUser) ? ['admin','super'] : ['admin'];
+    
+    // Rollen basierend auf User-Status und E-Mail
+    let roles;
+    if (userEmail === superUser) {
+      roles = ['admin', 'super'];
+    } else if (admin.status === 'pending' || !admin.email_verified) {
+      roles = ['client']; // Neue User bekommen CLIENT-Rolle
+    } else {
+      roles = ['admin']; // Verifizierte User bekommen ADMIN-Rolle
+    }
+    
     const token = jwt.sign(
       { sub: String(admin.id), email: admin.email, roles, tenants: (tenants||[]).map(t=>String(t.id)) },
       process.env.AUTH_JWT_SECRET,
