@@ -5,7 +5,7 @@ import crypto from 'crypto';
 const createTransporter = () => {
   // Für Entwicklung: SMTP (Gmail)
   if (process.env.NODE_ENV === 'development' || process.env.SMTP_USER) {
-    return nodemailer.createTransporter({
+    return nodemailer.createTransport({
       host: process.env.SMTP_HOST || 'smtp.gmail.com',
       port: process.env.SMTP_PORT || 587,
       secure: false,
@@ -18,7 +18,7 @@ const createTransporter = () => {
   
   // Für Produktion: SendGrid EU (empfohlen)
   if (process.env.SENDGRID_API_KEY) {
-    return nodemailer.createTransporter({
+    return nodemailer.createTransport({
       service: 'SendGrid',
       auth: {
         user: 'apikey',
@@ -29,7 +29,7 @@ const createTransporter = () => {
   
   // Fallback: Mailgun EU
   if (process.env.MAILGUN_EU_API_KEY) {
-    return nodemailer.createTransporter({
+    return nodemailer.createTransport({
       host: 'smtp.eu.mailgun.org',
       port: 587,
       secure: false,
@@ -41,7 +41,7 @@ const createTransporter = () => {
   }
   
   // Letzter Fallback: Gmail SMTP
-  return nodemailer.createTransporter({
+  return nodemailer.createTransport({
     host: 'smtp.gmail.com',
     port: 587,
     secure: false,

@@ -341,13 +341,8 @@ router.get('/oauth/google/callback', async (req, res) => {
       console.error('OAuth callback error:', e);
     }
     setTimeout(function(){ 
-      if (window.opener) {
-        window.close(); 
-      } else {
-        // Fallback: Redirect zur Frontend-Seite
-        window.location.href = '${process.env.FRONTEND_URL || 'https://revalenz.de'}';
-      }
-    }, 1000);
+      try { window.close(); } catch(_) {}
+    }, 500);
   })();
 </script>
 </body></html>`;
