@@ -8,13 +8,6 @@ on:
 jobs:
   build-test:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        workdir:
-          - shared
-          - revalenz-takeaction
-          - bausteine/auth-baustein
-          - bausteine/console-baustein
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -24,20 +17,16 @@ jobs:
         with:
           node-version: '18'
           cache: 'npm'
-          cache-dependency-path: ${{ matrix.workdir }}/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Install
-        working-directory: ${{ matrix.workdir }}
         run: npm ci
 
       - name: Lint (optional)
-        working-directory: ${{ matrix.workdir }}
         run: npm run lint || echo "no lint"
 
       - name: Build
-        working-directory: ${{ matrix.workdir }}
         run: npm run build || echo "no build"
 
       - name: Test (optional)
-        working-directory: ${{ matrix.workdir }}
         run: npm test || echo "no tests"

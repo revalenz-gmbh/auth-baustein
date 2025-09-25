@@ -8,26 +8,16 @@ on:
 jobs:
   audit:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        workdir:
-          - shared
-          - revalenz-takeaction
-          - bausteine/auth-baustein
-          - bausteine/console-baustein
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '18'
           cache: 'npm'
-          cache-dependency-path: ${{ matrix.workdir }}/package-lock.json
+          cache-dependency-path: package-lock.json
       - name: Install
-        working-directory: ${{ matrix.workdir }}
         run: npm ci
       - name: npm audit (prod)
-        working-directory: ${{ matrix.workdir }}
         run: npm audit --omit=dev --audit-level=moderate || true
       - name: npm audit (dev)
-        working-directory: ${{ matrix.workdir }}
         run: npm audit --include=dev --audit-level=high || true
