@@ -352,7 +352,7 @@ router.get('/oauth/google/callback', async (req, res) => {
     // Redirect-Flow: Wenn returnUrl vorhanden, per 302 zurück zur Admin-Seite inkl. Token
     if (state && typeof state.returnUrl === 'string' && state.returnUrl) {
       const returnUrl = state.returnUrl;
-      return res.redirect(302, `${returnUrl}#token=${encodeURIComponent(token)}`);
+      return res.redirect(302, `${returnUrl}?token=${encodeURIComponent(token)}`);
     }
     // Standard: JSON-Antwort
     return res.json({ success:true, token, tenants });
