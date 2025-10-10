@@ -1,6 +1,7 @@
 import express from 'express';
 import jwt from 'jsonwebtoken';
 import { query } from '../utils/db.js';
+import { getValidatedRedirectUrl } from '../utils/redirect.js';
 
 const router = express.Router();
 
@@ -127,7 +128,10 @@ router.get('/oauth/google/callback', async (req, res) => {
     // Parse state for privacy consent
     let state = {};
     try {
-      state = JSON.parse(Buffer.from(stateRaw, 'base64url').toString('utf8'));
+      // Decode base64url manually (replace - with +, _ with /, add padding)
+      const base64 = stateRaw.replace(/-/g, '+').replace(/_/g, '/');
+      const padded = base64 + '='.repeat((4 - base64.length % 4) % 4);
+      state = JSON.parse(Buffer.from(padded, 'base64').toString('utf8'));
     } catch {
       state = { nonce: stateRaw };
     }
@@ -170,9 +174,8 @@ router.get('/oauth/google/callback', async (req, res) => {
     const tenants = await fetchTenantsForUser(dbUser.id);
     const token = signToken(dbUser, tenants);
 
-    // Redirect to frontend with token
-    // state.returnUrl enthält bereits /auth/callback, also NICHT nochmal anhängen!
-    const redirectUrl = state.returnUrl || `${process.env.FRONTEND_URL || 'https://revalenz.de'}/auth/callback`;
+    // Redirect to frontend with token (validated for multi-tenant security)
+    const redirectUrl = getValidatedRedirectUrl(state);
     return res.redirect(`${redirectUrl}?token=${token}`);
 
   } catch (error) {
@@ -208,7 +211,10 @@ router.get('/oauth/github/callback', async (req, res) => {
     // Parse state for privacy consent
     let state = {};
     try {
-      state = JSON.parse(Buffer.from(stateRaw, 'base64url').toString('utf8'));
+      // Decode base64url manually (replace - with +, _ with /, add padding)
+      const base64 = stateRaw.replace(/-/g, '+').replace(/_/g, '/');
+      const padded = base64 + '='.repeat((4 - base64.length % 4) % 4);
+      state = JSON.parse(Buffer.from(padded, 'base64').toString('utf8'));
     } catch {
       state = { nonce: stateRaw };
     }
@@ -278,9 +284,8 @@ router.get('/oauth/github/callback', async (req, res) => {
     const tenants = await fetchTenantsForUser(dbUser.id);
     const token = signToken(dbUser, tenants);
 
-    // Redirect to frontend with token
-    // state.returnUrl enthält bereits /auth/callback, also NICHT nochmal anhängen!
-    const redirectUrl = state.returnUrl || `${process.env.FRONTEND_URL || 'https://revalenz.de'}/auth/callback`;
+    // Redirect to frontend with token (validated for multi-tenant security)
+    const redirectUrl = getValidatedRedirectUrl(state);
     return res.redirect(`${redirectUrl}?token=${token}`);
 
   } catch (error) {
@@ -317,7 +322,10 @@ router.get('/oauth/microsoft/callback', async (req, res) => {
     // Parse state for privacy consent
     let state = {};
     try {
-      state = JSON.parse(Buffer.from(stateRaw, 'base64url').toString('utf8'));
+      // Decode base64url manually (replace - with +, _ with /, add padding)
+      const base64 = stateRaw.replace(/-/g, '+').replace(/_/g, '/');
+      const padded = base64 + '='.repeat((4 - base64.length % 4) % 4);
+      state = JSON.parse(Buffer.from(padded, 'base64').toString('utf8'));
     } catch {
       state = { nonce: stateRaw };
     }
@@ -360,9 +368,8 @@ router.get('/oauth/microsoft/callback', async (req, res) => {
     const tenants = await fetchTenantsForUser(dbUser.id);
     const token = signToken(dbUser, tenants);
 
-    // Redirect to frontend with token
-    // state.returnUrl enthält bereits /auth/callback, also NICHT nochmal anhängen!
-    const redirectUrl = state.returnUrl || `${process.env.FRONTEND_URL || 'https://revalenz.de'}/auth/callback`;
+    // Redirect to frontend with token (validated for multi-tenant security)
+    const redirectUrl = getValidatedRedirectUrl(state);
     return res.redirect(`${redirectUrl}?token=${token}`);
 
   } catch (error) {
