@@ -1,16 +1,18 @@
 import express from 'express';
-import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { query } from '../utils/db.js';
-import { generateVerificationToken, sendVerificationEmail, sendWelcomeEmail } from '../utils/emailService.js';
 
 const router = express.Router();
 
-async function fetchTenantsForAdmin(adminId){
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+async function fetchTenantsForUser(userId) {
   try {
     const r = await query(
       'SELECT t.id, t.name FROM tenant_admins ta JOIN tenants t ON ta.tenant_id = t.id WHERE ta.admin_id = $1',
-      [adminId]
+      [userId]
     );
     return r.rows || [];
   } catch {
@@ -18,1299 +20,407 @@ async function fetchTenantsForAdmin(adminId){
   }
 }
 
-function signToken(admin, tenants){
+function signToken(user, tenants) {
   const tenantIds = (tenants || []).map(t => String(t.id));
   return jwt.sign(
-    { sub: String(admin.id), email: admin.email, roles: ['admin'], tenants: tenantIds },
+    { 
+      sub: String(user.id), 
+      email: user.email, 
+      roles: [user.role.toLowerCase()], 
+      tenants: tenantIds 
+    },
     process.env.AUTH_JWT_SECRET,
     { expiresIn: '1h' }
   );
 }
 
-// Admin-Registrierung (mit Setup-Token)
-router.post('/register', async (req, res) => {
-  try {
-    const setup = req.headers['x-setup-token'];
-    if (!setup || setup !== process.env.SETUP_TOKEN) {
-      return res.status(403).json({ success: false, message: 'Forbidden' });
-    }
-    const { name, email, password } = req.body || {};
-    if (!email || !password) return res.status(400).json({ success: false, message: 'email & password required' });
-    const hash = await bcrypt.hash(password, 10);
-    const result = await query(
-      'INSERT INTO users (name, email, password_hash, role, status) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (email) DO NOTHING RETURNING id, name, email, role, status, created_at',
-      [name || '', email, hash, 'ADMIN', 'active']
-    );
-    if (result.rowCount === 0) return res.status(409).json({ success: false, message: 'email exists' });
-    return res.json({ success: true, data: result.rows[0] });
-  } catch (e) {
-    console.error(e);
-    return res.status(500).json({ success: false, message: 'register failed' });
-  }
-});
+// ============================================================================
+// PUBLIC ENDPOINTS
+// ============================================================================
 
-// User-Registrierung (öffentlich, mit Email-Verifizierung)
-router.post('/register-user', async (req, res) => {
-  try {
-    const { name, email, password, company, privacy_consent, newsletter_consent } = req.body || {};
-    
-    // Validierung
-    if (!email || !password || !name) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Name, E-Mail und Passwort sind erforderlich' 
-      });
-    }
-    
-    if (!privacy_consent) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Datenschutz-Zustimmung ist erforderlich' 
-      });
-    }
-    
-    // E-Mail bereits vorhanden?
-    const existingUser = await query('SELECT id FROM users WHERE email = $1', [email]);
-    if (existingUser.rowCount > 0) {
-      return res.status(409).json({ 
-        success: false, 
-        message: 'E-Mail-Adresse bereits registriert' 
-      });
-    }
-    
-    // Passwort hashen
-    const hash = await bcrypt.hash(password, 10);
-    
-    // Verifizierungs-Token generieren
-    const verificationToken = generateVerificationToken();
-    const tokenExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 Stunden
-    
-    // User erstellen
-    const result = await query(
-      `INSERT INTO users (name, email, password_hash, company, role, status, email_verified, verification_token, verification_token_expires_at, privacy_consent, privacy_consent_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-       RETURNING id, name, email, company, role, status, created_at`,
-      [name, email, hash, company || null, 'CLIENT', 'pending', false, verificationToken, tokenExpiresAt, true, new Date()]
-    );
-    
-    const user = result.rows[0];
-    
-    // Verifizierungs-Email senden
-    try {
-      await sendVerificationEmail(email, name, verificationToken);
-      console.log(`Verification email sent to ${email}`);
-    } catch (emailError) {
-      console.error('Failed to send verification email:', emailError);
-      // Email-Fehler sollte die Registrierung nicht blockieren
-    }
-    
-    return res.json({ 
-      success: true, 
-      message: 'Registrierung erfolgreich. Bitte überprüfen Sie Ihre E-Mails.',
-      data: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        company: user.company,
-        status: user.status
-      }
-    });
-    
-  } catch (error) {
-    console.error('User registration error:', error);
-    return res.status(500).json({ 
-      success: false, 
-      message: 'Registrierung fehlgeschlagen' 
-    });
-  }
-});
-
-router.post('/login', async (req, res) => {
-  try {
-    const { email, password, api_key } = req.body || {};
-    let admin;
-    if (api_key) {
-      const r = await query('SELECT * FROM users WHERE api_key = $1', [api_key]);
-      admin = r.rows[0];
-    } else if (email && password) {
-      const r = await query('SELECT * FROM users WHERE email = $1', [email]);
-      admin = r.rows[0];
-      if (!admin) return res.status(401).json({ success: false, message: 'invalid credentials' });
-      const ok = await bcrypt.compare(password, admin.password_hash || '');
-      if (!ok) return res.status(401).json({ success: false, message: 'invalid credentials' });
-    } else {
-      return res.status(400).json({ success: false, message: 'email+password or api_key required' });
-    }
-
-    const tenants = await fetchTenantsForAdmin(admin.id);
-    const token = signToken(admin, tenants);
-    return res.json({ success: true, token, tenants });
-  } catch (e) {
-    console.error(e);
-    return res.status(500).json({ success: false, message: 'login failed' });
-  }
-});
-
+// Get current user info
 router.get('/me', async (req, res) => {
   try {
-    const auth = req.headers.authorization || '';
-    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-    if (!token) return res.status(401).json({ success: false, message: 'Unauthorized' });
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ success: false, message: 'No token provided' });
+    }
+
+    const token = authHeader.substring(7);
     const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
-    return res.json({ success: true, data: payload });
-  } catch (e) {
+    
+    const result = await query('SELECT id, email, name, role, status FROM users WHERE id = $1', [payload.sub]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    return res.json({ success: true, data: result.rows[0] });
+  } catch (error) {
+    console.error('Get user error:', error);
     return res.status(401).json({ success: false, message: 'Invalid token' });
   }
 });
 
-// --- Google OAuth ---
-const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
-const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
-const GOOGLE_USERINFO_URL = 'https://www.googleapis.com/oauth2/v3/userinfo';
+// Login with API Key (for automated systems)
+router.post('/login', async (req, res) => {
+  try {
+    const { api_key } = req.body || {};
+    
+    if (!api_key) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'API-Key erforderlich. Für User-Login bitte OAuth verwenden (Google, GitHub, Microsoft).' 
+      });
+    }
 
-function buildRedirectUri(){
-  const base = process.env.OAUTH_REDIRECT_BASE || 'http://localhost:4000';
-  return `${base}/auth/oauth/google/callback`;
-}
+    const r = await query('SELECT * FROM users WHERE api_key = $1', [api_key]);
+    const user = r.rows[0];
+    
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'Invalid API key' });
+    }
+
+    const tenants = await fetchTenantsForUser(user.id);
+    const token = signToken(user, tenants);
+
+    return res.json({ 
+      success: true, 
+      token, 
+      user: { 
+        id: user.id, 
+        email: user.email, 
+        name: user.name, 
+        role: user.role 
+      } 
+    });
+  } catch (e) {
+    console.error('API login error:', e);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
+// ============================================================================
+// OAUTH ENDPOINTS - GOOGLE
+// ============================================================================
 
 router.get('/oauth/google', (req, res) => {
-  const clientId = process.env.GOOGLE_CLIENT_ID;
-  if (!clientId) {
-    console.error('Missing GOOGLE_CLIENT_ID');
-    return res.status(500).json({ success:false, message:'GOOGLE_CLIENT_ID missing (ENV)' });
-  }
-  const redirectUri = buildRedirectUri();
-  // State mit Metadaten (Popup-Flow, erlaubte Origin)
-  let stateObj = { nonce: Math.random().toString(36).slice(2) };
-  const mode = (req.query.mode || '').toString();
-  const origin = (req.query.origin || '').toString();
-  const returnUrl = (req.query.return || '').toString();
-  if (mode) stateObj.mode = mode;
-  if (origin) stateObj.origin = origin;
-  if (returnUrl) stateObj.returnUrl = returnUrl;
-  let state;
-  try { state = Buffer.from(JSON.stringify(stateObj)).toString('base64url'); }
-  catch { state = stateObj.nonce; }
-  const scope = encodeURIComponent('openid email profile');
-  const url = `${GOOGLE_AUTH_URL}?response_type=code&client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}&state=${state}&access_type=offline&prompt=consent`;
-  return res.redirect(url);
+  const { state } = req.query;
+  const backendUrl = process.env.BACKEND_URL || 'https://accounts.revalenz.de';
+  const params = new URLSearchParams({
+    client_id: process.env.GOOGLE_CLIENT_ID,
+    redirect_uri: `${backendUrl}/api/auth/oauth/google/callback`,
+    response_type: 'code',
+    scope: 'openid email profile',
+    ...(state && { state })
+  });
+  res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params}`);
 });
 
 router.get('/oauth/google/callback', async (req, res) => {
   try {
-    const code = req.query.code;
-    if (!code) return res.status(400).json({ success:false, message:'code missing' });
-    // State parsen (Popup-Flow, erlaubte Origin)
-    let stateRaw = (req.query.state || '').toString();
-    let state = {};
-    try { state = JSON.parse(Buffer.from(stateRaw, 'base64url').toString('utf8')); }
-    catch { state = { nonce: stateRaw }; }
-    if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
-      console.error('Missing GOOGLE_CLIENT_ID/SECRET');
-      return res.status(500).json({ success:false, message:'GOOGLE_CLIENT_ID/SECRET missing (ENV)' });
+    const { code, state: stateRaw } = req.query;
+    
+    if (!code) {
+      return res.status(400).json({ success: false, message: 'No authorization code' });
     }
-    const params = new URLSearchParams();
-    params.append('code', code);
-    params.append('client_id', process.env.GOOGLE_CLIENT_ID);
-    params.append('client_secret', process.env.GOOGLE_CLIENT_SECRET);
-    params.append('redirect_uri', buildRedirectUri());
-    params.append('grant_type', 'authorization_code');
 
-    const tokenRes = await fetch(GOOGLE_TOKEN_URL, {
+    // Parse state for privacy consent
+    let state = {};
+    try {
+      state = JSON.parse(Buffer.from(stateRaw, 'base64url').toString('utf8'));
+    } catch {
+      state = { nonce: stateRaw };
+    }
+
+    const privacyConsent = state.privacy_consent?.accepted === true || false;
+
+    // Exchange code for tokens
+    const backendUrl = process.env.BACKEND_URL || 'https://accounts.revalenz.de';
+    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: params
+      body: new URLSearchParams({
+        code,
+        client_id: process.env.GOOGLE_CLIENT_ID,
+        client_secret: process.env.GOOGLE_CLIENT_SECRET,
+        redirect_uri: `${backendUrl}/api/auth/oauth/google/callback`,
+        grant_type: 'authorization_code'
+      })
     });
-    const tokenJson = await tokenRes.json();
-    if (!tokenRes.ok) {
-      console.error('Google token error', tokenJson);
-      return res.status(400).json({ success:false, message:'token exchange failed', detail: tokenJson });
+
+    const tokens = await tokenResponse.json();
+    if (!tokens.id_token) {
+      return res.status(400).json({ success: false, message: 'No ID token received' });
     }
 
-    const userRes = await fetch(GOOGLE_USERINFO_URL, {
-      headers: { 'Authorization': `Bearer ${tokenJson.access_token}` }
-    });
-    const user = await userRes.json();
-    if (!user.email) {
-      return sendOauthError(req, res, { code: 400, message: 'no email from provider' });
-    }
+    // Decode ID token to get user info
+    const user = jwt.decode(tokens.id_token);
 
-    const allowedDomain = (process.env.ALLOWED_DOMAIN || '').trim();
-    const superUser = (process.env.SUPER_ADMIN_EMAIL || '').trim().toLowerCase();
-    const userEmail = String(user.email).toLowerCase();
-    
-    // Prüfe ob User bereits existiert
-    const existingUser = await query('SELECT * FROM users WHERE email = $1', [user.email]);
-    
-    // Domain-Restriction nur für bestehende User anwenden
-    if (existingUser.rowCount > 0 && allowedDomain && !userEmail.endsWith(`@${allowedDomain.toLowerCase()}`) && userEmail !== superUser) {
-      // Zusätzlich prüfen: steht E-Mail in allowed_admins?
-      const allow = await query('SELECT 1 FROM allowed_admins WHERE LOWER(email)=LOWER($1) LIMIT 1', [user.email]);
-      if (allow.rowCount === 0) {
-        return sendOauthError(req, res, { code: 403, message: 'email domain not allowed', slug: 'domain_not_allowed' });
-      }
-    }
-
-    // 1) Existiert bereits ein Account mit diesem Provider?
-    const byProvider = await query(
-      'SELECT * FROM users WHERE provider=$1 AND provider_id=$2', ['google', user.sub]
+    // Insert or update user
+    const ins = await query(
+      `INSERT INTO users (name, email, provider, provider_id, role, status, email_verified, privacy_consent, privacy_consent_at)
+       VALUES ($1,$2,'google',$3,'CLIENT','active',true,$4,$5)
+       ON CONFLICT (provider, provider_id)
+       DO UPDATE SET name=EXCLUDED.name, email=EXCLUDED.email, privacy_consent=EXCLUDED.privacy_consent, privacy_consent_at=EXCLUDED.privacy_consent_at
+       RETURNING id, email, name, role`,
+      [user.name || user.email, user.email, user.sub, privacyConsent, privacyConsent ? new Date() : null]
     );
-    let admin;
-    if (byProvider.rowCount > 0) {
-      admin = byProvider.rows[0];
-    } else {
-      // 2) Sonst: Gibt es bereits einen Account mit der E-Mail? Dann Provider verknüpfen
-      const byEmail = await query('SELECT * FROM users WHERE email=$1', [user.email]);
-      if (byEmail.rowCount > 0) {
-        const upd = await query(
-          'UPDATE users SET provider=$1, provider_id=$2 WHERE id=$3 RETURNING id, email',
-          ['google', user.sub, byEmail.rows[0].id]
-        );
-        admin = upd.rows[0];
-      } else {
-        // 3) Neu anlegen - zunächst als 'pending' für Email-Verifizierung
-        const verificationToken = generateVerificationToken();
-        const tokenExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 Stunden
-        
-        const ins = await query(
-          `INSERT INTO users (name, email, provider, provider_id, role, status, email_verified, verification_token, verification_token_expires_at, privacy_consent)
-           VALUES ($1,$2,'google',$3,'CLIENT','pending',$4,$5,$6,$7)
-           ON CONFLICT (provider, provider_id)
-           DO UPDATE SET name=EXCLUDED.name, email=EXCLUDED.email
-           RETURNING id, email, name`,
-          [user.name || user.email, user.email, user.sub, false, verificationToken, tokenExpiresAt, true]
-        );
-        admin = ins.rows[0];
-        
-        // Verifizierungs-Email senden
-        try {
-          await sendVerificationEmail(user.email, user.name || user.email, verificationToken);
-          console.log(`Verification email sent to ${user.email}`);
-        } catch (emailError) {
-          console.error('Failed to send verification email:', emailError);
-          // Email-Fehler sollte den OAuth-Flow nicht blockieren
-        }
-      }
-    }
 
-    const tenants = await fetchTenantsForAdmin(admin.id);
-    
-    // Rollen basierend auf User-Status und E-Mail
-    let roles;
-    if (userEmail === superUser) {
-      roles = ['admin', 'super'];
-    } else if (admin.status === 'pending' || !admin.email_verified) {
-      roles = ['client']; // Neue User bekommen CLIENT-Rolle
-    } else {
-      roles = ['admin']; // Verifizierte User bekommen ADMIN-Rolle
-    }
-    
-    const token = jwt.sign(
-      { sub: String(admin.id), email: admin.email, roles, tenants: (tenants||[]).map(t=>String(t.id)) },
-      process.env.AUTH_JWT_SECRET,
-      { expiresIn: '1h' }
-    );
-    // Popup-Flow: Token via postMessage an opener zurückgeben
-    if (state && state.mode === 'popup') {
-      const safeOrigin = typeof state.origin === 'string' && state.origin.startsWith('http')
-        ? state.origin
-        : '*';
-      const html = `<!doctype html>
-<html><head><meta charset="utf-8"><title>Login erfolgreich</title></head>
-<body>
-<p>Login erfolgreich. Dieses Fenster wird automatisch geschlossen.</p>
-<script>
-  (function(){
-    try {
-      var token = ${JSON.stringify(token)};
-      var user = ${JSON.stringify({ id: admin.id, email: admin.email, name: admin.name })};
-      if (window.opener) {
-        window.opener.postMessage({ 
-          type: 'auth_success', 
-          token: token,
-          user: user
-        }, ${JSON.stringify(safeOrigin)});
-      }
-      // Versuche den Token in die Zwischenablage zu kopieren (als Fallback)
-      try {
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(String(token)).catch(function(){});
-        }
-      } catch(e) {}
-    } catch (e) {
-      console.error('OAuth callback error:', e);
-    }
-    setTimeout(function(){ 
-      try { window.close(); } catch(_) {}
-    }, 500);
-  })();
-</script>
-</body></html>`;
-      res.setHeader('Content-Type', 'text/html; charset=utf-8');
-      return res.status(200).send(html);
-    }
-    // Redirect-Flow: Wenn returnUrl vorhanden, per 302 zurück zur Admin-Seite inkl. Token
-    if (state && typeof state.returnUrl === 'string' && state.returnUrl) {
-      const returnUrl = state.returnUrl;
-      return res.redirect(302, `${returnUrl}?token=${encodeURIComponent(token)}`);
-    }
-    // Standard: JSON-Antwort
-    return res.json({ success:true, token, tenants });
-  } catch (e) {
-    console.error('OAuth callback error', e);
-    return sendOauthError(req, res, { code: 500, message: 'oauth failed' });
+    const dbUser = ins.rows[0];
+    const tenants = await fetchTenantsForUser(dbUser.id);
+    const token = signToken(dbUser, tenants);
+
+    // Redirect to frontend with token
+    // state.returnUrl enthält bereits /auth/callback, also NICHT nochmal anhängen!
+    const redirectUrl = state.returnUrl || `${process.env.FRONTEND_URL || 'https://revalenz.de'}/auth/callback`;
+    return res.redirect(`${redirectUrl}?token=${token}`);
+
+  } catch (error) {
+    console.error('Google OAuth error:', error);
+    return res.status(500).json({ success: false, message: 'oauth failed' });
   }
 });
+
+// ============================================================================
+// OAUTH ENDPOINTS - GITHUB
+// ============================================================================
+
+router.get('/oauth/github', (req, res) => {
+  const { state } = req.query;
+  const backendUrl = process.env.BACKEND_URL || 'https://accounts.revalenz.de';
+  const params = new URLSearchParams({
+    client_id: process.env.GITHUB_CLIENT_ID,
+    redirect_uri: `${backendUrl}/api/auth/oauth/github/callback`,
+    scope: 'user:email',
+    ...(state && { state })
+  });
+  res.redirect(`https://github.com/login/oauth/authorize?${params}`);
+});
+
+router.get('/oauth/github/callback', async (req, res) => {
+  try {
+    const { code, state: stateRaw } = req.query;
+    
+    if (!code) {
+      return res.status(400).json({ success: false, message: 'No authorization code' });
+    }
+
+    // Parse state for privacy consent
+    let state = {};
+    try {
+      state = JSON.parse(Buffer.from(stateRaw, 'base64url').toString('utf8'));
+    } catch {
+      state = { nonce: stateRaw };
+    }
+
+    const privacyConsent = state.privacy_consent?.accepted === true || false;
+
+    // Exchange code for access token
+    const backendUrl = process.env.BACKEND_URL || 'https://accounts.revalenz.de';
+    const tokenResponse = await fetch('https://github.com/login/oauth/access_token', {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({
+        code,
+        client_id: process.env.GITHUB_CLIENT_ID,
+        client_secret: process.env.GITHUB_CLIENT_SECRET,
+        redirect_uri: `${backendUrl}/api/auth/oauth/github/callback`
+      })
+    });
+
+    const tokens = await tokenResponse.json();
+    if (!tokens.access_token) {
+      return res.status(400).json({ success: false, message: 'No access token received' });
+    }
+
+    // Fetch user info from GitHub
+    const userResponse = await fetch('https://api.github.com/user', {
+      headers: { 
+        'Authorization': `Bearer ${tokens.access_token}`,
+        'Accept': 'application/json'
+      }
+    });
+
+    const user = await userResponse.json();
+
+    // Fetch primary email if not public
+    let email = user.email;
+    if (!email) {
+      const emailResponse = await fetch('https://api.github.com/user/emails', {
+        headers: { 
+          'Authorization': `Bearer ${tokens.access_token}`,
+          'Accept': 'application/json'
+        }
+      });
+      const emails = await emailResponse.json();
+      const primaryEmail = emails.find(e => e.primary);
+      email = primaryEmail ? primaryEmail.email : null;
+    }
+
+    if (!email) {
+      return res.status(400).json({ success: false, message: 'No email available from GitHub' });
+    }
+
+    // Insert or update user
+    const ins = await query(
+      `INSERT INTO users (name, email, provider, provider_id, role, status, email_verified, privacy_consent, privacy_consent_at)
+       VALUES ($1,$2,'github',$3,'CLIENT','active',true,$4,$5)
+       ON CONFLICT (provider, provider_id)
+       DO UPDATE SET name=EXCLUDED.name, email=EXCLUDED.email, privacy_consent=EXCLUDED.privacy_consent, privacy_consent_at=EXCLUDED.privacy_consent_at
+       RETURNING id, email, name, role`,
+      [user.name || user.login, email, String(user.id), privacyConsent, privacyConsent ? new Date() : null]
+    );
+
+    const dbUser = ins.rows[0];
+    const tenants = await fetchTenantsForUser(dbUser.id);
+    const token = signToken(dbUser, tenants);
+
+    // Redirect to frontend with token
+    // state.returnUrl enthält bereits /auth/callback, also NICHT nochmal anhängen!
+    const redirectUrl = state.returnUrl || `${process.env.FRONTEND_URL || 'https://revalenz.de'}/auth/callback`;
+    return res.redirect(`${redirectUrl}?token=${token}`);
+
+  } catch (error) {
+    console.error('GitHub OAuth error:', error);
+    return res.status(500).json({ success: false, message: 'oauth failed' });
+  }
+});
+
+// ============================================================================
+// OAUTH ENDPOINTS - MICROSOFT
+// ============================================================================
+
+router.get('/oauth/microsoft', (req, res) => {
+  const { state } = req.query;
+  const backendUrl = process.env.BACKEND_URL || 'https://accounts.revalenz.de';
+  const params = new URLSearchParams({
+    client_id: process.env.MICROSOFT_CLIENT_ID,
+    redirect_uri: `${backendUrl}/api/auth/oauth/microsoft/callback`,
+    response_type: 'code',
+    scope: 'openid email profile',
+    ...(state && { state })
+  });
+  res.redirect(`https://login.microsoftonline.com/common/oauth2/v2.0/authorize?${params}`);
+});
+
+router.get('/oauth/microsoft/callback', async (req, res) => {
+  try {
+    const { code, state: stateRaw } = req.query;
+    
+    if (!code) {
+      return res.status(400).json({ success: false, message: 'No authorization code' });
+    }
+
+    // Parse state for privacy consent
+    let state = {};
+    try {
+      state = JSON.parse(Buffer.from(stateRaw, 'base64url').toString('utf8'));
+    } catch {
+      state = { nonce: stateRaw };
+    }
+
+    const privacyConsent = state.privacy_consent?.accepted === true || false;
+
+    // Exchange code for tokens
+    const backendUrl = process.env.BACKEND_URL || 'https://accounts.revalenz.de';
+    const tokenResponse = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code,
+        client_id: process.env.MICROSOFT_CLIENT_ID,
+        client_secret: process.env.MICROSOFT_CLIENT_SECRET,
+        redirect_uri: `${backendUrl}/api/auth/oauth/microsoft/callback`,
+        grant_type: 'authorization_code'
+      })
+    });
+
+    const tokens = await tokenResponse.json();
+    if (!tokens.id_token) {
+      return res.status(400).json({ success: false, message: 'No ID token received' });
+    }
+
+    // Decode ID token to get user info
+    const user = jwt.decode(tokens.id_token);
+
+    // Insert or update user
+    const ins = await query(
+      `INSERT INTO users (name, email, provider, provider_id, role, status, email_verified, privacy_consent, privacy_consent_at)
+       VALUES ($1,$2,'microsoft',$3,'CLIENT','active',true,$4,$5)
+       ON CONFLICT (provider, provider_id)
+       DO UPDATE SET name=EXCLUDED.name, email=EXCLUDED.email, privacy_consent=EXCLUDED.privacy_consent, privacy_consent_at=EXCLUDED.privacy_consent_at
+       RETURNING id, email, name, role`,
+      [user.name || user.email, user.email, user.oid || user.sub, privacyConsent, privacyConsent ? new Date() : null]
+    );
+
+    const dbUser = ins.rows[0];
+    const tenants = await fetchTenantsForUser(dbUser.id);
+    const token = signToken(dbUser, tenants);
+
+    // Redirect to frontend with token
+    // state.returnUrl enthält bereits /auth/callback, also NICHT nochmal anhängen!
+    const redirectUrl = state.returnUrl || `${process.env.FRONTEND_URL || 'https://revalenz.de'}/auth/callback`;
+    return res.redirect(`${redirectUrl}?token=${token}`);
+
+  } catch (error) {
+    console.error('Microsoft OAuth error:', error);
+    return res.status(500).json({ success: false, message: 'oauth failed' });
+  }
+});
+
+// ============================================================================
+// USER STATUS (for checking email verification, etc.)
+// ============================================================================
+
+router.get('/user-status', async (req, res) => {
+  try {
+    const { email } = req.query;
+    
+    if (!email) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'E-Mail-Adresse erforderlich' 
+      });
+    }
+
+    const result = await query(
+      'SELECT id, email, status, email_verified, provider FROM users WHERE email = $1',
+      [email]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Benutzer nicht gefunden' 
+      });
+    }
+
+    const user = result.rows[0];
+    return res.json({ 
+      success: true, 
+      data: {
+        email: user.email,
+        status: user.status,
+        emailVerified: user.email_verified,
+        provider: user.provider
+      }
+    });
+
+  } catch (error) {
+    console.error('User status error:', error);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Fehler beim Abrufen des Benutzerstatus' 
+    });
+  }
+});
+
+// ============================================================================
+// EXPORTS
+// ============================================================================
 
 export default router;
 
-function sendOauthError(req, res, { code = 400, message = 'oauth failed', slug = '' } = {}){
-  try {
-    // Versuche State zu lesen, um Popup/Redirect unterscheiden zu können
-    let stateRaw = (req.query.state || '').toString();
-    let state = {};
-    try { state = JSON.parse(Buffer.from(stateRaw, 'base64url').toString('utf8')); }
-    catch { state = { nonce: stateRaw }; }
-    // Popup-Modus: eine kleine HTML-Seite liefern, die dem Opener den Fehler sendet und das Fenster schließt
-    if (state && state.mode === 'popup') {
-      const safeOrigin = typeof state.origin === 'string' && state.origin.startsWith('http')
-        ? state.origin
-        : '*';
-      const returnUrl = typeof state.returnUrl === 'string' && state.returnUrl ? state.returnUrl : '';
-      const html = `<!doctype html>
-<html><head><meta charset="utf-8"><title>Login fehlgeschlagen</title></head>
-<body>
-<p>Login fehlgeschlagen: ${message}</p>
-<p>Dieses Fenster wird automatisch geschlossen.</p>
-<script>
-(function(){
-  try {
-    if (window.opener) {
-      window.opener.postMessage({ 
-        type: 'auth_error', 
-        message: ${JSON.stringify(message)}, 
-        slug: ${JSON.stringify(slug)},
-        code: ${code}
-      }, ${JSON.stringify(safeOrigin)});
-    }
-    if (${JSON.stringify(!!returnUrl)}) {
-      try { 
-        window.location.replace(${JSON.stringify(returnUrl)} + '#error=' + encodeURIComponent(${JSON.stringify(slug || 'oauth_failed')})); 
-      } catch(e) {}
-    }
-  } catch (e) {
-    console.error('OAuth error handling failed:', e);
-  }
-  setTimeout(function(){ 
-    if (window.opener) {
-      window.close(); 
-    } else {
-      // Fallback: Redirect zur Frontend-Seite
-      window.location.href = '${process.env.FRONTEND_URL || 'https://revalenz.de'}';
-    }
-  }, 2000);
-})();
-</script>
-</body></html>`;
-      res.setHeader('Content-Type', 'text/html; charset=utf-8');
-      return res.status(code).send(html);
-    }
-    // Redirect-Modus / ohne State: zur Admin-Seite mit Fehler im Hash zurückleiten, sofern "return" mitgegeben wurde
-    const returnUrl = (req.query.return || req.query.returnUrl || '').toString();
-    if (returnUrl) {
-      return res.redirect(302, `${returnUrl}#error=${encodeURIComponent(slug || 'oauth_failed')}`);
-    }
-  } catch(_) {}
-  return res.status(code).json({ success:false, message });
-}
-
-// Tenants des eingeloggten Admins
-router.get('/tenants', async (req, res) => {
-  try {
-    const auth = req.headers.authorization || '';
-    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
-    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
-    let tenants;
-    const isSuper = Array.isArray(payload.roles) && payload.roles.includes('super');
-    if (isSuper) {
-      const r = await query('SELECT id, name FROM tenants ORDER BY id ASC');
-      tenants = r.rows;
-    } else {
-      tenants = await fetchTenantsForAdmin(payload.sub);
-    }
-    return res.json({ success:true, data: tenants });
-  } catch (e) {
-    return res.status(401).json({ success:false, message:'Invalid token' });
-  }
-});
-
-// Allowlist verwalten (nur Super‑Admin)
-router.get('/allowed-admins', async (req, res) => {
-  try {
-    const auth = req.headers.authorization || '';
-    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
-    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
-    const isSuper = Array.isArray(payload.roles) && payload.roles.includes('super');
-    if (!isSuper) return res.status(403).json({ success:false, message:'forbidden' });
-    const r = await query('SELECT id, email, tenant_id, role, created_at FROM allowed_admins ORDER BY email ASC');
-    return res.json({ success:true, data: r.rows });
-  } catch (e) {
-    return res.status(500).json({ success:false, message:'list failed' });
-  }
-});
-
-// Produkte lesen/anlegen
-router.get('/products', async (req, res) => {
-  try {
-    const r = await query('SELECT key, name, is_active FROM products WHERE is_active=TRUE ORDER BY name ASC');
-    return res.json({ success:true, data: r.rows });
-  } catch (e) {
-    return res.status(500).json({ success:false, message:'list products failed' });
-  }
-});
-
-router.post('/products', async (req, res) => {
-  try {
-    const auth = req.headers.authorization || '';
-    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
-    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
-    const isSuper = Array.isArray(payload.roles) && payload.roles.includes('super');
-    if (!isSuper) return res.status(403).json({ success:false, message:'forbidden' });
-    const { key, name, is_active = true } = req.body || {};
-    if (!key || !name) return res.status(400).json({ success:false, message:'key and name required' });
-    await query('INSERT INTO products (key, name, is_active) VALUES ($1,$2,$3) ON CONFLICT (key) DO UPDATE SET name=EXCLUDED.name, is_active=EXCLUDED.is_active', [key, name, !!is_active]);
-    return res.status(201).json({ success:true });
-  } catch (e) {
-    return res.status(500).json({ success:false, message:'upsert product failed' });
-  }
-});
-
-// Produkt-Instanzen
-router.get('/products/instances', async (req, res) => {
-  try {
-    const auth = req.headers.authorization || '';
-    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
-    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
-    const owner = String(req.query.owner||'');
-    const ownerId = owner === 'me' ? parseInt(payload.sub, 10) : parseInt(req.query.owner_id||'0',10);
-    if (!ownerId) return res.status(400).json({ success:false, message:'owner required' });
-    const r = await query('SELECT id, product_key, name, tenant_id, is_active, created_at FROM product_instances WHERE owner_admin_id=$1 ORDER BY created_at DESC', [ownerId]);
-    return res.json({ success:true, data: r.rows });
-  } catch (e) {
-    return res.status(500).json({ success:false, message:'list instances failed' });
-  }
-});
-
-router.post('/products/instances', async (req, res) => {
-  try {
-    const auth = req.headers.authorization || '';
-    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
-    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
-    const { product, name, tenant_id, meta } = req.body || {};
-    if (!product || !name || !tenant_id) return res.status(400).json({ success:false, message:'product, name and tenant_id required' });
-    // Validierungen
-    const pcheck = await query('SELECT 1 FROM products WHERE key=$1 AND is_active=TRUE', [String(product)]);
-    if (pcheck.rowCount === 0) return res.status(400).json({ success:false, message:'unknown product key' });
-    const tcheck = await query('SELECT 1 FROM tenants WHERE id=$1', [tenant_id]);
-    if (tcheck.rowCount === 0) return res.status(400).json({ success:false, message:'tenant not found' });
-    const ins = await query(
-      `INSERT INTO product_instances (product_key, owner_admin_id, tenant_id, name, meta)
-       VALUES ($1,$2,$3,$4,$5::jsonb)
-       ON CONFLICT (tenant_id, product_key, name)
-       DO NOTHING
-       RETURNING id`,
-      [String(product), parseInt(payload.sub,10), tenant_id, name, meta ? JSON.stringify(meta) : null]
-    );
-    if (ins.rowCount === 0) return res.status(409).json({ success:false, message:'instance exists' });
-    return res.status(201).json({ success:true, data:{ id: ins.rows[0].id } });
-  } catch (e) {
-    console.error('create instance failed', e);
-    return res.status(500).json({ success:false, message:'create instance failed' });
-  }
-});
-
-router.get('/products/instances/:id/licenses', async (req, res) => {
-  try {
-    const auth = req.headers.authorization || '';
-    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
-    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
-    const id = parseInt(req.params.id, 10);
-    const ownerCheck = await query('SELECT 1 FROM product_instances WHERE id=$1 AND owner_admin_id=$2', [id, payload.sub]);
-    if (ownerCheck.rowCount === 0) return res.status(403).json({ success:false, message:'forbidden' });
-    const r = await query('SELECT e.id, e.admin_id, a.email, a.first_name, a.last_name, e.status, e.valid_until FROM entitlements e JOIN admins a ON a.id=e.admin_id WHERE e.product_instance_id=$1 ORDER BY a.email', [id]);
-    return res.json({ success:true, data: r.rows });
-  } catch (e) {
-    return res.status(500).json({ success:false, message:'list instance licenses failed' });
-  }
-});
-
-router.post('/products/instances/:id/licenses', async (req, res) => {
-  try {
-    const auth = req.headers.authorization || '';
-    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
-    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
-    const id = parseInt(req.params.id, 10);
-    const { admin_id, status='active' } = req.body || {};
-    if (!admin_id) return res.status(400).json({ success:false, message:'admin_id required' });
-    const ownerCheck = await query('SELECT 1 FROM product_instances WHERE id=$1 AND owner_admin_id=$2', [id, payload.sub]);
-    if (ownerCheck.rowCount === 0) return res.status(403).json({ success:false, message:'forbidden' });
-    await query(
-      `INSERT INTO entitlements (product_instance_id, admin_id, status, product_key)
-       VALUES ($1,$2,$3,'custom')
-       ON CONFLICT (product_instance_id, admin_id)
-       DO UPDATE SET status=EXCLUDED.status`,
-      [id, admin_id, status]
-    );
-    return res.status(201).json({ success:true });
-  } catch (e) {
-    return res.status(500).json({ success:false, message:'assign instance license failed' });
-  }
-});
-
-router.delete('/products/instances/:id/licenses', async (req, res) => {
-  try {
-    const auth = req.headers.authorization || '';
-    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
-    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
-    const id = parseInt(req.params.id, 10);
-    const adminId = parseInt(req.query.admin_id||'0',10);
-    if (!adminId) return res.status(400).json({ success:false, message:'admin_id required' });
-    const ownerCheck = await query('SELECT 1 FROM product_instances WHERE id=$1 AND owner_admin_id=$2', [id, payload.sub]);
-    if (ownerCheck.rowCount === 0) return res.status(403).json({ success:false, message:'forbidden' });
-    await query('DELETE FROM entitlements WHERE product_instance_id=$1 AND admin_id=$2', [id, adminId]);
-    return res.json({ success:true });
-  } catch (e) {
-    return res.status(500).json({ success:false, message:'revoke instance license failed' });
-  }
-});
-
-router.post('/allowed-admins', async (req, res) => {
-  try {
-    const auth = req.headers.authorization || '';
-    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
-    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
-    const isSuper = Array.isArray(payload.roles) && payload.roles.includes('super');
-    if (!isSuper) return res.status(403).json({ success:false, message:'forbidden' });
-    const { email, tenant_id, role } = req.body || {};
-    if (!email) return res.status(400).json({ success:false, message:'email required' });
-    await query('INSERT INTO allowed_admins (email, tenant_id, role) VALUES ($1,$2,$3) ON CONFLICT (email) DO UPDATE SET tenant_id=EXCLUDED.tenant_id, role=EXCLUDED.role', [email, tenant_id || null, role || 'admin']);
-    return res.json({ success:true });
-  } catch (e) {
-    return res.status(500).json({ success:false, message:'upsert failed' });
-  }
-});
-
-router.delete('/allowed-admins', async (req, res) => {
-  try {
-    const auth = req.headers.authorization || '';
-    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
-    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
-    const isSuper = Array.isArray(payload.roles) && payload.roles.includes('super');
-    if (!isSuper) return res.status(403).json({ success:false, message:'forbidden' });
-    const email = (req.query.email||'').toString().trim();
-    if (!email) return res.status(400).json({ success:false, message:'email required' });
-    const del = await query('DELETE FROM allowed_admins WHERE LOWER(email)=LOWER($1)', [email]);
-    if (del.rowCount === 0) return res.status(404).json({ success:false, message:'not found' });
-    return res.json({ success:true, message:'deleted' });
-  } catch (e) {
-    return res.status(500).json({ success:false, message:'delete failed' });
-  }
-});
-
-// Tenant löschen (nur wenn keine weiteren Daten vorhanden sind)
-router.delete('/tenants/:id', async (req, res) => {
-  try {
-    const auth = req.headers.authorization || '';
-    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
-    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
-    const id = parseInt(req.params.id, 10);
-    if (!id) return res.status(400).json({ success:false, message:'invalid id' });
-
-    // Prüfen: Super-Admin darf alles, sonst nur zugeordnete Tenants
-    const isSuper = Array.isArray(payload.roles) && payload.roles.includes('super');
-    if (!isSuper) {
-      const rel = await query('SELECT 1 FROM tenant_admins WHERE tenant_id=$1 AND admin_id=$2', [id, payload.sub]);
-      if (rel.rowCount === 0) return res.status(403).json({ success:false, message:'forbidden' });
-    }
-
-    // Nutzungsprüfung: existieren Lizenzen? (später: Events/Orders)
-    const lic = await query('SELECT 1 FROM licenses WHERE tenant_id=$1 LIMIT 1', [id]);
-    if (lic.rowCount > 0) return res.status(409).json({ success:false, message:'tenant has dependent data (licenses)' });
-
-    await query('DELETE FROM tenant_admins WHERE tenant_id=$1', [id]);
-    const del = await query('DELETE FROM tenants WHERE id=$1', [id]);
-    if (del.rowCount === 0) return res.status(404).json({ success:false, message:'not found' });
-    return res.json({ success:true, message:'tenant deleted' });
-  } catch (e) {
-    console.error('delete tenant error', e);
-    return res.status(500).json({ success:false, message:'delete tenant failed' });
-  }
-});
-
-// Tenant anlegen und eingeloggten Admin zuordnen
-router.post('/tenants', async (req, res) => {
-  try {
-    const auth = req.headers.authorization || '';
-    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
-    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
-    const { name } = req.body || {};
-    if (!name || String(name).trim().length < 2) {
-      return res.status(400).json({ success:false, message:'name required' });
-    }
-    // Prüfen auf Duplikat (case-insensitive)
-    const exists = await query('SELECT id FROM tenants WHERE LOWER(name)=LOWER($1)', [name]);
-    if (exists.rowCount > 0) {
-      return res.status(409).json({ success:false, message:'tenant name exists' });
-    }
-    const ins = await query('INSERT INTO tenants (name) VALUES ($1) RETURNING id, name', [name]);
-    const tenant = ins.rows[0];
-    await query('INSERT INTO tenant_admins (tenant_id, admin_id, role) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING', [tenant.id, payload.sub, 'owner']);
-    return res.status(201).json({ success:true, data: tenant });
-  } catch (e) {
-    console.error('create tenant error', e);
-    return res.status(500).json({ success:false, message:'create tenant failed' });
-  }
-});
-
-// --- Memberships (Admin-Zuweisungen pro Tenant) ---
-// Mitglieder eines Tenants auflisten (nur Super oder Tenant-Mitglied)
-router.get('/tenants/:tenantId/members', async (req, res) => {
-  try {
-    const auth = req.headers.authorization || '';
-    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
-    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
-    const tenantId = parseInt(req.params.tenantId, 10);
-    if (!tenantId) return res.status(400).json({ success:false, message:'invalid tenantId' });
-    const isSuper = Array.isArray(payload.roles) && payload.roles.includes('super');
-    if (!isSuper) {
-      const rel = await query('SELECT 1 FROM tenant_admins WHERE tenant_id=$1 AND admin_id=$2', [tenantId, payload.sub]);
-      if (rel.rowCount === 0) return res.status(403).json({ success:false, message:'forbidden' });
-    }
-    const r = await query(
-      `SELECT a.id as admin_id, a.email, a.first_name, a.last_name, ta.role
-       FROM tenant_admins ta
-       JOIN admins a ON a.id = ta.admin_id
-       WHERE ta.tenant_id=$1
-       ORDER BY a.email ASC`,
-      [tenantId]
-    );
-    return res.json({ success:true, data: r.rows });
-  } catch (e) {
-    return res.status(500).json({ success:false, message:'list members failed' });
-  }
-});
-
-// Mitglied hinzufügen (nur Super oder Owner). Optional: Produktlizenz zuweisen
-router.post('/tenants/:tenantId/members', async (req, res) => {
-  try {
-    const auth = req.headers.authorization || '';
-    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
-    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
-    const tenantId = parseInt(req.params.tenantId, 10);
-    if (!tenantId) return res.status(400).json({ success:false, message:'invalid tenantId' });
-    const { email, role, first_name, last_name, product_key } = req.body || {};
-    const normEmail = (email||'').trim().toLowerCase();
-    if (!normEmail) return res.status(400).json({ success:false, message:'email required' });
-    if (!first_name || !last_name) return res.status(400).json({ success:false, message:'first_name and last_name required' });
-    const desiredRole = (role||'admin').toLowerCase();
-    if (!['user','admin','owner'].includes(desiredRole)) return res.status(400).json({ success:false, message:'invalid role' });
-
-    // Berechtigung prüfen
-    const isSuper = Array.isArray(payload.roles) && payload.roles.includes('super');
-    if (!isSuper) {
-      const rel = await query('SELECT role FROM tenant_admins WHERE tenant_id=$1 AND admin_id=$2', [tenantId, payload.sub]);
-      if (rel.rowCount === 0) return res.status(403).json({ success:false, message:'forbidden' });
-      const callerRole = (rel.rows[0].role||'admin').toLowerCase();
-      if (callerRole !== 'owner') return res.status(403).json({ success:false, message:'owner required' });
-    }
-
-    // Admin anlegen/finden (bestehende Namen NICHT überschreiben)
-    let adminId;
-    const existing = await query('SELECT id, name FROM users WHERE LOWER(email)=LOWER($1)', [normEmail]);
-    if (existing.rowCount > 0) {
-      adminId = existing.rows[0].id;
-      // Prüfen: Ist Nutzer bereits Mitglied dieser Organisation?
-      const relExists = await query('SELECT 1 FROM tenant_admins WHERE tenant_id=$1 AND admin_id=$2', [tenantId, adminId]);
-      if (relExists.rowCount > 0) {
-        return res.status(409).json({ success:false, message:'Mitglied ist bereits in dieser Organisation registriert' });
-      }
-      // Bestehenden Namen nicht überschreiben – nur Mitgliedschaft setzen
-    } else {
-      const ins = await query('INSERT INTO users (email, name, role, status) VALUES ($1,$2,$3,$4) RETURNING id', [normEmail, `${first_name} ${last_name}`.trim(), 'CLIENT', 'active']);
-      adminId = ins.rows[0].id;
-      try { await query('INSERT INTO allowed_admins (email) VALUES ($1) ON CONFLICT (email) DO NOTHING', [normEmail]); } catch(_){ }
-    }
-
-    // Beziehung setzen
-    await query(
-      `INSERT INTO tenant_admins (tenant_id, admin_id, role)
-       VALUES ($1,$2,$3)
-       ON CONFLICT (tenant_id, admin_id) DO UPDATE SET role=EXCLUDED.role`,
-      [tenantId, adminId, desiredRole]
-    );
-    if (product_key && ['tickets','impulse'].includes(String(product_key))) {
-      await query(
-        `INSERT INTO entitlements (tenant_id, admin_id, product_key, status)
-         VALUES ($1,$2,$3,'active')
-         ON CONFLICT (tenant_id, admin_id, product_key)
-         DO UPDATE SET status='active'`,
-        [tenantId, adminId, String(product_key)]
-      );
-    }
-    return res.status(201).json({ success:true });
-  } catch (e) {
-    console.error('add member failed', e);
-    return res.status(500).json({ success:false, message: e?.message || 'add member failed' });
-  }
-});
-
-// Mitglied entfernen (nur Super oder Owner; letzten Owner schützen)
-router.delete('/tenants/:tenantId/members', async (req, res) => {
-  try {
-    const auth = req.headers.authorization || '';
-    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
-    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
-    const tenantId = parseInt(req.params.tenantId, 10);
-    const email = (req.query.email||'').toString().trim().toLowerCase();
-    if (!tenantId || !email) return res.status(400).json({ success:false, message:'invalid params' });
-
-    const isSuper = Array.isArray(payload.roles) && payload.roles.includes('super');
-    if (!isSuper) {
-      const rel = await query('SELECT role FROM tenant_admins WHERE tenant_id=$1 AND admin_id=$2', [tenantId, payload.sub]);
-      if (rel.rowCount === 0) return res.status(403).json({ success:false, message:'forbidden' });
-      const callerRole = (rel.rows[0].role||'admin').toLowerCase();
-      if (callerRole !== 'owner') return res.status(403).json({ success:false, message:'owner required' });
-    }
-
-    const target = await query('SELECT u.id, u.role FROM users u JOIN tenant_admins ta ON ta.admin_id=u.id AND ta.tenant_id=$1 WHERE LOWER(u.email)=LOWER($2)', [tenantId, email]);
-    if (target.rowCount === 0) return res.status(404).json({ success:false, message:'member not found' });
-    const targetRole = (target.rows[0].role||'admin').toLowerCase();
-    if (targetRole === 'owner') {
-      const owners = await query('SELECT COUNT(*)::int AS c FROM tenant_admins WHERE tenant_id=$1 AND LOWER(role)=\'owner\'', [tenantId]);
-      if (owners.rows[0].c <= 1) return res.status(400).json({ success:false, message:'cannot remove last owner' });
-    }
-    await query('DELETE FROM tenant_admins WHERE tenant_id=$1 AND admin_id=$2', [tenantId, target.rows[0].id]);
-    return res.json({ success:true });
-  } catch (e) {
-    return res.status(500).json({ success:false, message:'remove member failed' });
-  }
-});
-
-// --- Lizenzverwaltung (vereinfachtes Modell: Lizenz an tenants) ---
-// Liste/Details: Tenant inkl. Lizenzfelder
-router.get('/tenants/:tenantId/licenses', async (req, res) => {
-  try {
-    const auth = req.headers.authorization || '';
-    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
-    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
-    const tenantId = parseInt(req.params.tenantId, 10);
-    if (!tenantId) return res.status(400).json({ success:false, message:'invalid tenantId' });
-    const isSuper = Array.isArray(payload.roles) && payload.roles.includes('super');
-    if (!isSuper) {
-      const rel = await query('SELECT role FROM tenant_admins WHERE tenant_id=$1 AND admin_id=$2', [tenantId, payload.sub]);
-      if (rel.rowCount === 0) return res.status(403).json({ success:false, message:'forbidden' });
-    }
-    const r = await query('SELECT id, name, license_plan, license_status, license_valid_until, license_meta FROM tenants WHERE id=$1', [tenantId]);
-    if (r.rowCount === 0) return res.status(404).json({ success:false, message:'tenant not found' });
-    return res.json({ success:true, data: r.rows[0] });
-  } catch (e) {
-    return res.status(500).json({ success:false, message:'list licenses failed' });
-  }
-});
-
-// Lizenz anlegen/aktualisieren (Super oder Owner) – schreibt direkt auf tenants
-router.post('/tenants/:tenantId/licenses', async (req, res) => {
-  try {
-    const auth = req.headers.authorization || '';
-    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
-    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
-    const tenantId = parseInt(req.params.tenantId, 10);
-    if (!tenantId) return res.status(400).json({ success:false, message:'invalid tenantId' });
-    const { plan, status, valid_until, meta } = req.body || {};
-    if (!plan) return res.status(400).json({ success:false, message:'plan required' });
-
-    const isSuper = Array.isArray(payload.roles) && payload.roles.includes('super');
-    if (!isSuper) {
-      const rel = await query('SELECT role FROM tenant_admins WHERE tenant_id=$1 AND admin_id=$2', [tenantId, payload.sub]);
-      if (rel.rowCount === 0) return res.status(403).json({ success:false, message:'forbidden' });
-      const role = rel.rows[0].role || 'admin';
-      if (!['owner','admin'].includes(role)) return res.status(403).json({ success:false, message:'forbidden' });
-    }
-
-    // Künftig über entitlements (org-weite Lizenz: admin_id NULL, product=tickets)
-    const upsert = await query(
-      `INSERT INTO entitlements (tenant_id, admin_id, product_key, plan, status, valid_until, meta)
-       VALUES ($1, NULL, 'tickets', $2, COALESCE($3,'active'), $4::timestamp, $5::jsonb)
-       ON CONFLICT (tenant_id, product_key) WHERE admin_id IS NULL
-       DO UPDATE SET plan=EXCLUDED.plan, status=EXCLUDED.status, valid_until=EXCLUDED.valid_until, meta=EXCLUDED.meta
-       RETURNING id`,
-      [tenantId, plan, status || 'active', valid_until || null, meta ? JSON.stringify(meta) : null]
-    );
-    return res.json({ success:true, data: { entitlement_id: upsert.rows[0].id } });
-  } catch (e) {
-    console.error('upsert license error', e);
-    return res.status(500).json({ success:false, message:'upsert license failed' });
-  }
-});
-
-// Lizenz deaktivieren (nur Super) – setzt Status auf inactive
-router.delete('/tenants/:tenantId/licenses/:id', async (req, res) => {
-  try {
-    const auth = req.headers.authorization || '';
-    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
-    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
-    const isSuper = Array.isArray(payload.roles) && payload.roles.includes('super');
-    if (!isSuper) return res.status(403).json({ success:false, message:'forbidden' });
-    const tenantId = parseInt(req.params.tenantId, 10);
-    if (!tenantId) return res.status(400).json({ success:false, message:'invalid ids' });
-    const upd = await query(
-      `UPDATE entitlements SET status='inactive' WHERE tenant_id=$1 AND admin_id IS NULL AND product_key='tickets' RETURNING id`,
-      [tenantId]
-    );
-    if (upd.rowCount === 0) return res.status(404).json({ success:false, message:'org entitlement not found' });
-    return res.json({ success:true, message:'license set inactive' });
-  } catch (e) {
-    return res.status(500).json({ success:false, message:'delete license failed' });
-  }
-});
-
-// --- Entitlements lesen ---
-// Org-weiter Plan je Produkt (admin_id IS NULL)
-router.get('/tenants/:tenantId/entitlements/org', async (req, res) => {
-  try {
-    const auth = req.headers.authorization || '';
-    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
-    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
-    const tenantId = parseInt(req.params.tenantId, 10);
-    if (!tenantId) return res.status(400).json({ success:false, message:'invalid tenantId' });
-    const product = String(req.query.product || 'tickets');
-    const isSuper = Array.isArray(payload.roles) && payload.roles.includes('super');
-    if (!isSuper) {
-      const rel = await query('SELECT 1 FROM tenant_admins WHERE tenant_id=$1 AND admin_id=$2', [tenantId, payload.sub]);
-      if (rel.rowCount === 0) return res.status(403).json({ success:false, message:'forbidden' });
-    }
-    const r = await query(
-      `SELECT id, tenant_id, product_key, plan, status, valid_until, meta, created_at
-       FROM entitlements
-       WHERE tenant_id=$1 AND admin_id IS NULL AND product_key=$2`,
-      [tenantId, product]
-    );
-    return res.json({ success:true, data: r.rows });
-  } catch (e) {
-    return res.status(500).json({ success:false, message:'read org entitlements failed' });
-  }
-});
-
-// Org-Plan schreiben (product, plan, status, valid_until)
-router.post('/tenants/:tenantId/entitlements/org', async (req, res) => {
-  try {
-    const auth = req.headers.authorization || '';
-    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
-    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
-    const tenantId = parseInt(req.params.tenantId, 10);
-    if (!tenantId) return res.status(400).json({ success:false, message:'invalid tenantId' });
-    const { product = 'tickets', plan, status = 'active', valid_until = null, meta = null } = req.body || {};
-    if (!plan) return res.status(400).json({ success:false, message:'plan required' });
-    const isSuper = Array.isArray(payload.roles) && payload.roles.includes('super');
-    if (!isSuper) {
-      const rel = await query('SELECT role FROM tenant_admins WHERE tenant_id=$1 AND admin_id=$2', [tenantId, payload.sub]);
-      if (rel.rowCount === 0) return res.status(403).json({ success:false, message:'forbidden' });
-    }
-    const upsert = await query(
-      `INSERT INTO entitlements (tenant_id, admin_id, product_key, plan, status, valid_until, meta)
-       VALUES ($1, NULL, $2, $3, $4, $5::timestamp, $6::jsonb)
-       ON CONFLICT (tenant_id, product_key) WHERE admin_id IS NULL
-       DO UPDATE SET plan=EXCLUDED.plan, status=EXCLUDED.status, valid_until=EXCLUDED.valid_until, meta=EXCLUDED.meta
-       RETURNING id`,
-      [tenantId, String(product), plan, status, valid_until, meta ? JSON.stringify(meta) : null]
-    );
-    return res.json({ success:true, data:{ entitlement_id: upsert.rows[0].id } });
-  } catch (e) {
-    console.error('upsert org entitlement failed', e);
-    return res.status(500).json({ success:false, message:'upsert org entitlement failed' });
-  }
-});
-
-// Member-Service zuweisen (product/status)
-router.post('/tenants/:tenantId/entitlements/members/:adminId', async (req, res) => {
-  try {
-    const auth = req.headers.authorization || '';
-    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
-    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
-    const tenantId = parseInt(req.params.tenantId, 10);
-    const adminId = parseInt(req.params.adminId, 10);
-    if (!tenantId || !adminId) return res.status(400).json({ success:false, message:'invalid params' });
-    const { product = 'tickets', status = 'active' } = req.body || {};
-    const isSuper = Array.isArray(payload.roles) && payload.roles.includes('super');
-    if (!isSuper) {
-      const rel = await query('SELECT role FROM tenant_admins WHERE tenant_id=$1 AND admin_id=$2', [tenantId, payload.sub]);
-      if (rel.rowCount === 0) return res.status(403).json({ success:false, message:'forbidden' });
-    }
-    await query(
-      `INSERT INTO entitlements (tenant_id, admin_id, product_key, status)
-       VALUES ($1,$2,$3,$4)
-       ON CONFLICT (tenant_id, admin_id, product_key)
-       DO UPDATE SET status=EXCLUDED.status`,
-      [tenantId, adminId, String(product), status]
-    );
-    return res.status(201).json({ success:true });
-  } catch (e) {
-    console.error('assign member entitlement failed', e);
-    return res.status(500).json({ success:false, message:'assign member entitlement failed' });
-  }
-});
-
-// Member-Service entziehen (per product)
-router.delete('/tenants/:tenantId/entitlements/members/:adminId', async (req, res) => {
-  try {
-    const auth = req.headers.authorization || '';
-    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
-    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
-    const tenantId = parseInt(req.params.tenantId, 10);
-    const adminId = parseInt(req.params.adminId, 10);
-    const product = String(req.query.product || 'tickets');
-    if (!tenantId || !adminId || !product) return res.status(400).json({ success:false, message:'invalid params' });
-    const isSuper = Array.isArray(payload.roles) && payload.roles.includes('super');
-    if (!isSuper) {
-      const rel = await query('SELECT role FROM tenant_admins WHERE tenant_id=$1 AND admin_id=$2', [tenantId, payload.sub]);
-      if (rel.rowCount === 0) return res.status(403).json({ success:false, message:'forbidden' });
-    }
-    await query('DELETE FROM entitlements WHERE tenant_id=$1 AND admin_id=$2 AND product_key=$3', [tenantId, adminId, product]);
-    return res.json({ success:true });
-  } catch (e) {
-    console.error('remove member entitlement failed', e);
-    return res.status(500).json({ success:false, message:'remove member entitlement failed' });
-  }
-});
-
-// Member-Services eines Admins in einer Org
-router.get('/tenants/:tenantId/entitlements/members/:adminId', async (req, res) => {
-  try {
-    const auth = req.headers.authorization || '';
-    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-    if (!token) return res.status(401).json({ success:false, message:'Unauthorized' });
-    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
-    const tenantId = parseInt(req.params.tenantId, 10);
-    const adminId = parseInt(req.params.adminId, 10);
-    if (!tenantId || !adminId) return res.status(400).json({ success:false, message:'invalid params' });
-    const isSuper = Array.isArray(payload.roles) && payload.roles.includes('super');
-    if (!isSuper) {
-      const rel = await query('SELECT 1 FROM tenant_admins WHERE tenant_id=$1 AND admin_id=$2', [tenantId, payload.sub]);
-      if (rel.rowCount === 0) return res.status(403).json({ success:false, message:'forbidden' });
-    }
-    const product = req.query.product ? String(req.query.product) : null;
-    const sql = product
-      ? `SELECT id, tenant_id, admin_id, product_key, status, valid_until, meta, created_at
-         FROM entitlements WHERE tenant_id=$1 AND admin_id=$2 AND product_key=$3`
-      : `SELECT id, tenant_id, admin_id, product_key, status, valid_until, meta, created_at
-         FROM entitlements WHERE tenant_id=$1 AND admin_id=$2`;
-    const params = product ? [tenantId, adminId, product] : [tenantId, adminId];
-    const r = await query(sql, params);
-    return res.json({ success:true, data: r.rows });
-  } catch (e) {
-    return res.status(500).json({ success:false, message:'read member entitlements failed' });
-  }
-});
-
-// ============================================================================
-// EMAIL-VERIFIKATION ENDPOINTS
-// ============================================================================
-
-// Email-Verifizierung durchführen
-router.get('/verify-email', async (req, res) => {
-  try {
-    const { token } = req.query;
-    
-    if (!token) {
-      return res.status(400).json({
-        success: false,
-        message: 'Verifizierungs-Token fehlt'
-      });
-    }
-    
-    // Token validieren und User verifizieren
-    const result = await query(
-      `SELECT verify_user_email($1, $2, $3) as result`,
-      [token, req.ip, req.get('User-Agent')]
-    );
-    
-    if (result.rows.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Token ungültig oder abgelaufen'
-      });
-    }
-    
-    const verificationResult = result.rows[0].result;
-    
-    if (!verificationResult.success) {
-      return res.status(400).json({
-        success: false,
-        message: verificationResult.message
-      });
-    }
-    
-    // Willkommens-Email senden
-    try {
-      const userResult = await query(
-        'SELECT name, email FROM users WHERE id = $1',
-        [verificationResult.user_id]
-      );
-      
-      if (userResult.rows.length > 0) {
-        const user = userResult.rows[0];
-        await sendWelcomeEmail(user.email, user.name);
-        console.log(`Welcome email sent to ${user.email}`);
-      }
-    } catch (emailError) {
-      console.error('Failed to send welcome email:', emailError);
-      // Email-Fehler sollte die Verifizierung nicht blockieren
-    }
-    
-    // HTML-Seite für erfolgreiche Verifizierung
-    const html = `<!DOCTYPE html>
-<html lang="de">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>E-Mail erfolgreich verifiziert - Revalenz</title>
-    <style>
-        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }
-        .header { background-color: #1e40af; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }
-        .content { background-color: #f8fafc; padding: 30px; border-radius: 0 0 8px 8px; text-align: center; }
-        .success { color: #059669; font-size: 24px; margin: 20px 0; }
-        .button { display: inline-block; background-color: #1e40af; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin: 20px 0; }
-        .logo { max-width: 150px; height: auto; }
-    </style>
-</head>
-<body>
-    <div class="header">
-        <img src="${process.env.FRONTEND_URL || 'https://revalenz.de'}/logo-revalenzblau.png" alt="Revalenz" class="logo">
-        <h1>E-Mail erfolgreich verifiziert!</h1>
-    </div>
-    <div class="content">
-        <div class="success">✅</div>
-        <h2>Herzlichen Glückwunsch!</h2>
-        <p>Ihre E-Mail-Adresse wurde erfolgreich verifiziert. Ihr Konto ist jetzt vollständig aktiviert.</p>
-        <p>Sie können jetzt alle Services von Revalenz nutzen:</p>
-        <ul style="text-align: left; display: inline-block;">
-            <li>🚀 KIckstart Workshop anmelden</li>
-            <li>💡 Innovationsberatung buchen</li>
-            <li>🛠️ Baukasten-System nutzen</li>
-        </ul>
-        <div>
-            <a href="${process.env.FRONTEND_URL || 'https://revalenz.de'}" class="button">Zur Revalenz-Website</a>
-        </div>
-        <p><small>Diese Seite wird automatisch in 10 Sekunden weitergeleitet...</small></p>
-    </div>
-    <script>
-        setTimeout(function() {
-            window.location.href = '${process.env.FRONTEND_URL || 'https://revalenz.de'}';
-        }, 10000);
-    </script>
-</body>
-</html>`;
-    
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    return res.send(html);
-    
-  } catch (error) {
-    console.error('Email verification error:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Verifizierung fehlgeschlagen'
-    });
-  }
-});
-
-// Verifizierungs-Email erneut senden
-router.post('/resend-verification', async (req, res) => {
-  try {
-    const { email } = req.body;
-    
-    if (!email) {
-      return res.status(400).json({
-        success: false,
-        message: 'E-Mail-Adresse erforderlich'
-      });
-    }
-    
-    // User finden
-    const userResult = await query(
-      'SELECT id, email, name, email_verified, verification_token_expires_at FROM users WHERE email = $1',
-      [email]
-    );
-    
-    if (userResult.rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'Benutzer nicht gefunden'
-      });
-    }
-    
-    const user = userResult.rows[0];
-    
-    // Bereits verifiziert?
-    if (user.email_verified) {
-      return res.status(400).json({
-        success: false,
-        message: 'E-Mail-Adresse bereits verifiziert'
-      });
-    }
-    
-    // Neuen Token generieren (falls der alte abgelaufen ist)
-    let verificationToken = user.verification_token;
-    let tokenExpiresAt = user.verification_token_expires_at;
-    
-    if (!verificationToken || new Date(tokenExpiresAt) < new Date()) {
-      verificationToken = generateVerificationToken();
-      tokenExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 Stunden
-      
-      await query(
-        'UPDATE users SET verification_token = $1, verification_token_expires_at = $2 WHERE id = $3',
-        [verificationToken, tokenExpiresAt, user.id]
-      );
-    }
-    
-    // Verifizierungs-Email senden
-    const emailResult = await sendVerificationEmail(user.email, user.name, verificationToken);
-    
-    if (!emailResult.success) {
-      return res.status(500).json({
-        success: false,
-        message: 'E-Mail konnte nicht gesendet werden'
-      });
-    }
-    
-    return res.json({
-      success: true,
-      message: 'Verifizierungs-E-Mail wurde erneut gesendet'
-    });
-    
-  } catch (error) {
-    console.error('Resend verification error:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Fehler beim Senden der E-Mail'
-    });
-  }
-});
-
-// User-Status prüfen (für Frontend)
-router.get('/user-status', async (req, res) => {
-  try {
-    const auth = req.headers.authorization || '';
-    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-    
-    if (!token) {
-      return res.status(401).json({
-        success: false,
-        message: 'Token erforderlich'
-      });
-    }
-    
-    const payload = jwt.verify(token, process.env.AUTH_JWT_SECRET);
-    
-    const userResult = await query(
-      'SELECT id, email, name, email_verified, status, role FROM users WHERE id = $1',
-      [payload.sub]
-    );
-    
-    if (userResult.rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'Benutzer nicht gefunden'
-      });
-    }
-    
-    const user = userResult.rows[0];
-    
-    return res.json({
-      success: true,
-      data: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        email_verified: user.email_verified,
-        status: user.status,
-        role: user.role
-      }
-    });
-    
-  } catch (error) {
-    console.error('User status check error:', error);
-    return res.status(401).json({
-      success: false,
-      message: 'Ungültiger Token'
-    });
-  }
-});
-
-// Test-Endpoint für E-Mail-Versand (nur für Entwicklung)
-router.post('/test-email', async (req, res) => {
-  try {
-    // Nur in Entwicklung erlauben
-    if (process.env.NODE_ENV === 'production') {
-      return res.status(403).json({
-        success: false,
-        message: 'Test-Endpoint nur in Entwicklung verfügbar'
-      });
-    }
-
-    const { email } = req.body;
-    
-    if (!email) {
-      return res.status(400).json({
-        success: false,
-        message: 'E-Mail-Adresse erforderlich'
-      });
-    }
-
-    // Test-E-Mail senden
-    const testToken = generateVerificationToken();
-    const emailResult = await sendVerificationEmail(email, 'Test User', testToken);
-    
-    if (emailResult.success) {
-      return res.json({
-        success: true,
-        message: 'Test-E-Mail erfolgreich gesendet',
-        messageId: emailResult.messageId
-      });
-    } else {
-      return res.status(500).json({
-        success: false,
-        message: 'E-Mail konnte nicht gesendet werden',
-        error: emailResult.error
-      });
-    }
-    
-  } catch (error) {
-    console.error('Test email error:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Fehler beim Senden der Test-E-Mail'
-    });
-  }
-});

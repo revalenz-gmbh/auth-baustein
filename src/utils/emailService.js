@@ -118,8 +118,15 @@ export const sendVerificationEmail = async (email, name, token) => {
               <a href="${verificationUrl}" class="button">E-Mail-Adresse bestätigen</a>
             </div>
             
-            <p><strong>Datenschutz-Hinweis:</strong></p>
-            <p>Mit der Bestätigung Ihrer E-Mail-Adresse stimmen Sie zu, dass Revalenz GmbH Ihre Daten gemäß unserer <a href="${process.env.FRONTEND_URL || 'https://revalenz.de'}/datenschutz">Datenschutzerklärung</a> verarbeitet. Sie können Ihre Einwilligung jederzeit widerrufen.</p>
+            <p><strong>📋 Datenschutz-Zustimmung:</strong></p>
+            <p>Mit der Bestätigung Ihrer E-Mail-Adresse stimmen Sie ausdrücklich zu, dass Revalenz GmbH:</p>
+            <ul>
+              <li>✅ Ihre E-Mail-Adresse für die Konto-Verwaltung nutzt</li>
+              <li>✅ Ihnen Workshop-Informationen und Updates sendet</li>
+              <li>✅ Ihre Daten gemäß unserer <a href="${process.env.FRONTEND_URL || 'https://revalenz.de'}/datenschutz">Datenschutzerklärung</a> verarbeitet</li>
+              <li>✅ Ihre Einwilligung jederzeit widerrufen werden kann</li>
+            </ul>
+            <p><strong>🔒 Ihre Daten sind sicher:</strong> Wir verwenden nur EU-konforme Server und verschlüsseln alle Übertragungen.</p>
             
             <p>Falls der Button nicht funktioniert, kopieren Sie bitte diesen Link in Ihren Browser:</p>
             <p style="word-break: break-all; background-color: #e5e7eb; padding: 10px; border-radius: 4px; font-family: monospace;">${verificationUrl}</p>

@@ -10,7 +10,10 @@
     { "src": "/auth/(.*)", "dest": "/api/[...all].js" },
     { "src": "/favicon.(ico|png)", "status": 204 },
     { "src": "/(.*)", "dest": "/index.html" }
-  ]
+  ],
+  "env": {
+    "NODE_ENV": "production"
+  }
 }
 
 
