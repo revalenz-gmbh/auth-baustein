@@ -4,6 +4,101 @@ Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert
 
 ---
 
+## [2.2.0] - 2025-10-11
+
+### 🚀 Neue Features
+
+- **Lizenz-Middleware:** `requireLicense()`, `requirePlan()`, `checkQuota()`
+- **Lizenz-Helper:** Umfassende Helper-Funktionen für Lizenz-Management
+- **Lizenz-Routes:** RESTful API für Lizenz-CRUD-Operationen
+- **Quota-Management:** Automatisches Tracking und Validierung von Feature-Limits
+- **Plan-Hierarchie:** Free → Starter → Pro → Enterprise
+
+### 📚 Dokumentation
+
+- **USAGE_EXAMPLES.md:** Vollständige Integration-Beispiele für alle Use-Cases
+- **SUBMODULE_GUIDE.md:** Git Submodule Workflow für Multi-Projekt-Setup
+- **API-Dokumentation:** Alle Lizenz-Endpoints mit Request/Response-Beispielen
+
+### 🔧 Technische Änderungen
+
+**`src/middleware/checkLicense.js`:**
+```javascript
+// Lizenz-Validierung als Express Middleware
+export function requireLicense(productKey) { ... }
+export function requirePlan(productKey, allowedPlans) { ... }
+export function checkQuota(productKey, feature, count) { ... }
+```
+
+**`src/utils/license.js`:**
+```javascript
+// Helper-Funktionen (15+ Funktionen)
+- hasActiveLicense()
+- getLicensePlan()
+- checkQuota()
+- incrementUsage()
+- createOrUpdateLicense()
+- upgradeLicense()
+- listLicenses()
+// ... und mehr
+```
+
+**`src/routes/licenses.js`:**
+```javascript
+// RESTful API-Endpoints
+GET    /api/licenses/tenants/:id
+GET    /api/licenses/tenants/:id/products/:key
+POST   /api/licenses/tenants/:id/products/:key
+POST   /api/licenses/tenants/:id/products/:key/upgrade
+DELETE /api/licenses/tenants/:id/products/:key
+GET    /api/licenses/products
+GET    /api/licenses/plans
+```
+
+### 🎯 Integration
+
+**Console-Baustein (Ticketsystem):**
+```javascript
+app.use('/api/tickets', requireAuth, requireLicense('tickets'));
+app.use('/api/orders', requireAuth, requireLicense('tickets'));
+```
+
+**Benefizshow:**
+```javascript
+app.use('/api/admin', requireAuth, requireLicense('tickets'));
+```
+
+### 🔄 Git Submodule
+
+**Setup für neue Projekte:**
+```bash
+git submodule add https://github.com/revalenz-gmbh/auth-baustein.git bausteine/auth-baustein
+git submodule update --init --recursive
+```
+
+**Updates synchronisieren:**
+```bash
+cd bausteine/auth-baustein
+git pull origin main
+cd ../..
+git add bausteine/auth-baustein
+git commit -m "chore: Update auth-baustein"
+```
+
+### 📊 Status
+
+- **Deployments:** ✅ Erfolgreich deployed
+- **Integration:** 
+  - ✅ Revalenz Platform
+  - ✅ Benefizshow Ticket-System
+- **Getestete Features:**
+  - ✅ Org-Level Lizenzen
+  - ✅ Member-Level Lizenzen
+  - ✅ Quota-Tracking
+  - ✅ Plan-Upgrades
+
+---
+
 ## [2.1.0] - 2025-10-11
 
 ### 🚀 Neue Features
