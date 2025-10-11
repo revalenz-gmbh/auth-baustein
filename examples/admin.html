@@ -1,0 +1,1100 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Admin – Rotary Benefizshow</title>
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin: 24px; color: #111; }
+    h1 { color: #1e40af; }
+    .row { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; }
+    input, button { padding: 8px 12px; font-size: 14px; }
+    button { background: #1e40af; color: #fff; border: 0; border-radius: 6px; cursor: pointer; }
+    button:disabled { opacity: .6; cursor: not-allowed; }
+    table { border-collapse: collapse; width: 100%; margin-top: 16px; }
+    th, td { border: 1px solid #e5e7eb; padding: 8px; font-size: 14px; }
+    th { background: #f8fafc; text-align: left; }
+    .success { color: #065f46; }
+    .error { color: #b91c1c; }
+    .muted { color: #6b7280; font-size: 12px; }
+  </style>
+  <script src="admin-config.js"></script>
+  <script>
+    const CFG = (window.ADMIN_CONFIG || {});
+    const API_BASE = CFG.API_BASE || 'https://ticket.benefizshow.de/api';
+    const AUTH_BASE = CFG.AUTH_BASE || 'https://accounts.revalenz.de/api'; // ✅ Aktualisiert auf production Auth-Baustein
+
+    function getStoredToken(){
+      try { return localStorage.getItem('admin_jwt') || ''; } catch(_) { return ''; }
+    }
+    function normalizeToken(raw){
+      if (!raw) return '';
+      let t = String(raw).trim();
+      // Falls komplette JSON-Antwort eingefügt wurde
+      if (t.startsWith('{')) {
+        try {
+          const obj = JSON.parse(t);
+          if (obj && obj.token) t = String(obj.token);
+        } catch {}
+      }
+      // Falls Zeile mit token: "..." kopiert wurde
+      const m = t.match(/token\s*[:=]\s*\"([^\"]+)\"/i);
+      if (m && m[1]) t = m[1];
+      // Anführungszeichen entfernen
+      if ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'"))) {
+        t = t.slice(1, -1);
+      }
+      return t;
+    }
+    function setStoredToken(token){
+      const clean = normalizeToken(token);
+      try { localStorage.setItem('admin_jwt', clean || ''); } catch(_) {}
+      const el = document.getElementById('jwt'); if (el) el.value = clean || '';
+      renderAuthState();
+    }
+    function clearStoredToken(){ setStoredToken(''); }
+
+    async function renderAuthState(){
+      const token = getStoredToken();
+      const info = document.getElementById('authinfo');
+      if (!info) return;
+      if (token) {
+        const meta = decodeJwtMeta(token);
+        if (meta) {
+          const { email, expDate, expired } = meta;
+          info.textContent = expired
+            ? `Angemeldet als ${email || 'unbekannt'} – Token abgelaufen (${expDate.toLocaleString('de-DE')})`
+            : `Angemeldet als ${email || 'unbekannt'} – Token gültig bis ${expDate.toLocaleString('de-DE')}`;
+          info.className = expired ? 'error' : 'success';
+          const ue = document.getElementById('user_email'); if (ue) ue.value = email || '';
+          try { await loadTenantsInfo(); } catch(_) {}
+        } else {
+          info.textContent = 'Angemeldet (JWT vorhanden)'; info.className = 'success';
+          const ue = document.getElementById('user_email'); if (ue) ue.value = '';
+        }
+        setAuthVisibility(true);
+      } else {
+        info.textContent = 'Nicht angemeldet'; info.className = 'muted';
+        setAuthVisibility(false);
+        const ue = document.getElementById('user_email'); if (ue) ue.value = '';
+        const ti = document.getElementById('tenant_info'); if (ti) ti.value = '';
+      }
+    }
+
+    function buildAuthHeaders(extra){
+      const headers = Object.assign({}, extra || {});
+      const token = getStoredToken();
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      } else {
+        const key = (document.getElementById('apikey')?.value || '').trim();
+        if (key) headers['X-API-Key'] = key;
+      }
+      const tenant = (document.getElementById('tenant_select')?.value || '').trim();
+      if (tenant) headers['X-Tenant-Id'] = tenant;
+      return headers;
+    }
+
+    function base64UrlDecode(input){
+      try {
+        const pad = (str) => str + '='.repeat((4 - (str.length % 4)) % 4);
+        const b64 = pad(input.replace(/-/g, '+').replace(/_/g, '/'));
+        const text = atob(b64);
+        const bytes = new Uint8Array([...text].map(c => c.charCodeAt(0)));
+        const decoder = new TextDecoder('utf-8');
+        return decoder.decode(bytes);
+      } catch { return null; }
+    }
+
+    function decodeJwtMeta(token){
+      try {
+        const parts = token.split('.');
+        if (parts.length !== 3) return null;
+        const payloadJson = base64UrlDecode(parts[1]);
+        if (!payloadJson) return null;
+        const payload = JSON.parse(payloadJson);
+        const email = payload.email || payload.sub || '';
+        const exp = typeof payload.exp === 'number' ? payload.exp : 0;
+        const expDate = exp ? new Date(exp * 1000) : new Date(0);
+        const now = Date.now();
+        const expired = exp ? (now >= exp * 1000) : false;
+        return { email, exp, expDate, expired, payload };
+      } catch { return null; }
+    }
+
+    function setAuthVisibility(isAuthed){
+      const ids = ['rowData','rowConfirm','eventBlock','typesBlock','ordersBlock'];
+      ids.forEach(id => { const el = document.getElementById(id); if (el) el.style.display = isAuthed ? '' : 'none'; });
+      if (!isAuthed) clearProtectedUI();
+    }
+
+    function clearProtectedUI(){
+      try {
+        // Eingabefelder leeren
+        const ids = ['jwt','apikey','order','ev_name','ev_event_date','ev_event_time','ev_doors_open_time','ev_location','ev_total_capacity','ev_seating_mode','ev_order_prefix','ev_organizer_name','ev_organizer_support_email','ev_bank_account_holder','ev_bank_iban','ev_bank_bic','ev_bank_name','ev_description'];
+        ids.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+        // Tabellen leeren
+        const ordersTbody = document.querySelector('#orders tbody'); if (ordersTbody) ordersTbody.innerHTML = '';
+        const typesTbody = document.querySelector('#types tbody'); if (typesTbody) typesTbody.innerHTML = '';
+        // Zähler/Meldungen
+        const count = document.getElementById('count'); if (count) count.textContent = '';
+        clearMsg();
+      } catch(_){}
+    }
+
+    async function fetchOrders() {
+      clearMsg();
+      const key = document.getElementById('apikey').value.trim();
+      if (!getStoredToken() && !key) return showError('Bitte einloggen (Google) oder X-API-Key eintragen.');
+      setLoading(true);
+      try {
+        const res = await fetch(`${API_BASE}/admin/orders?limit=100`, { headers: buildAuthHeaders() });
+        const ct = res.headers.get('content-type') || '';
+        const data = ct.includes('application/json') ? await res.json() : { success:false, message: await res.text() };
+        if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`);
+        renderOrders(data.data.orders || []);
+      } catch (e) {
+        showError(e.message);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    async function confirmPayment() {
+      clearMsg();
+      const orderNumber = document.getElementById('order').value.trim();
+      const key = document.getElementById('apikey').value.trim();
+      if (!getStoredToken() && !key) return showError('Bitte einloggen (Google) oder X-API-Key eintragen.');
+      if (!orderNumber) return showError('Bitte Bestellnummer eingeben.');
+      setLoading(true);
+      try {
+        const res = await fetch(`${API_BASE}/admin/confirm-payment`, {
+          method: 'POST',
+          headers: buildAuthHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ order_number: orderNumber })
+        });
+        const ct = res.headers.get('content-type') || '';
+        const data = ct.includes('application/json') ? await res.json() : { success:false, message: await res.text() };
+        if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`);
+        showSuccess(data.message || 'Zahlung bestätigt. Tickets werden versendet.');
+        // Liste neu laden
+        await fetchOrders();
+      } catch (e) {
+        showError(e.message);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    function renderOrders(orders) {
+      const tbody = document.querySelector('#orders tbody');
+      tbody.innerHTML = '';
+      orders.forEach(o => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${o.order_number}</td>
+          <td>${o.email}</td>
+          <td>${Number(o.total_price).toFixed(2)} €</td>
+          <td>${o.ticket_count}</td>
+          <td>${o.status}</td>
+          <td>${new Date(o.created_at).toLocaleString('de-DE')}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+      document.getElementById('count').textContent = `${orders.length} Bestellungen`;
+    }
+
+    function setLoading(v){
+      document.getElementById('load').disabled = v;
+      document.getElementById('confirm').disabled = v;
+    }
+    function showSuccess(msg){ const el = document.getElementById('msg'); el.className='success'; el.textContent=msg; }
+    function showError(msg){ const el = document.getElementById('msg'); el.className='error'; el.textContent=msg; }
+    function clearMsg(){ const el = document.getElementById('msg'); el.className='muted'; el.textContent=''; }
+
+    async function generateVipPrintPdf(){
+      clearMsg();
+      const key = document.getElementById('apikey').value.trim();
+      if (!getStoredToken() && !key) return showError('Bitte einloggen (Google) oder X-API-Key eintragen.');
+      const count = parseInt(document.getElementById('vip_count').value || '0', 10);
+      const eventId = parseInt(document.getElementById('vip_event_id').value || '1', 10);
+      const template = (document.getElementById('vip_template').value || 'builtin');
+      if (!count || count <= 0) return showError('Bitte eine Anzahl > 0 angeben.');
+      try {
+        const layout = {};
+        const mt = document.getElementById('vip_marginTop').value; if (mt) layout.marginTop = parseFloat(mt);
+        const ml = document.getElementById('vip_marginLeft').value; if (ml) layout.marginLeft = parseFloat(ml);
+        const cw = document.getElementById('vip_cardWidth').value; if (cw) layout.cardWidth = parseFloat(cw);
+        const ch = document.getElementById('vip_cardHeight').value; if (ch) layout.cardHeight = parseFloat(ch);
+        const vg = document.getElementById('vip_vGap').value; if (vg) layout.vGap = parseFloat(vg);
+        const gx = document.getElementById('vip_globalOffsetX').value; if (gx) layout.globalOffsetX = parseFloat(gx);
+        const gy = document.getElementById('vip_globalOffsetY').value; if (gy) layout.globalOffsetY = parseFloat(gy);
+        const qx = document.getElementById('vip_qrOffsetX').value; if (qx) layout.qrOffsetX = parseFloat(qx);
+        const qy = document.getElementById('vip_qrOffsetY').value; if (qy) layout.qrOffsetY = parseFloat(qy);
+        const tx = document.getElementById('vip_titleOffsetX').value; if (tx) layout.titleOffsetX = parseFloat(tx);
+        const ty = document.getElementById('vip_titleOffsetY').value; if (ty) layout.titleOffsetY = parseFloat(ty);
+        const ix = document.getElementById('vip_infoOffsetX').value; if (ix) layout.infoOffsetX = parseFloat(ix);
+        const iy = document.getElementById('vip_infoOffsetY').value; if (iy) layout.infoOffsetY = parseFloat(iy);
+        layout.showBoxes = document.getElementById('vip_showBoxes').checked;
+
+        const headers = buildAuthHeaders({ 'Content-Type': 'application/json' });
+        // Wichtig: VIP-Endpoint verlangt X-API-Key, auch wenn ein JWT vorhanden ist
+        const vipKey = (document.getElementById('apikey')?.value || '').trim();
+        if (vipKey) headers['X-API-Key'] = vipKey;
+
+        const res = await fetch(`${API_BASE}/vip/print`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ count, event_id: eventId, template, layout, vip_notes: (document.getElementById('vip_notes').value || '').trim(), actor: (document.getElementById('user_email')?.value || '') })
+        });
+
+        const ct = res.headers.get('content-type') || '';
+        if (res.ok && ct.includes('application/pdf')){
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `vip-print-${Date.now()}.pdf`;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+          showSuccess('VIP‑Druck‑PDF erzeugt.');
+        } else {
+          const data = await res.json().catch(async () => ({ message: await res.text() }));
+          throw new Error(data.message || `HTTP ${res.status}`);
+        }
+      } catch (e) {
+        showError(e.message);
+      }
+    }
+    async function collectVipLayout(){
+      const layout = {};
+      const ids = [
+        ['vip_marginTop','marginTop'],['vip_marginLeft','marginLeft'],['vip_cardWidth','cardWidth'],['vip_cardHeight','cardHeight'],
+        ['vip_vGap','vGap'],['vip_globalOffsetX','globalOffsetX'],['vip_globalOffsetY','globalOffsetY'],
+        ['vip_qrOffsetX','qrOffsetX'],['vip_qrOffsetY','qrOffsetY'],['vip_titleOffsetX','titleOffsetX'],['vip_titleOffsetY','titleOffsetY'],
+        ['vip_infoOffsetX','infoOffsetX'],['vip_infoOffsetY','infoOffsetY']
+      ];
+      ids.forEach(([id,key])=>{ const v = document.getElementById(id)?.value; if(v !== undefined && v !== '') layout[key] = parseFloat(v); });
+      layout.showBoxes = document.getElementById('vip_showBoxes')?.checked || false;
+      return layout;
+    }
+    async function saveVipPreset(){
+      clearMsg();
+      const key = document.getElementById('apikey').value.trim();
+      if (!getStoredToken() && !key) return showError('Bitte einloggen (Google) oder X-API-Key eintragen.');
+      const name = prompt('Preset-Name (z. B. BürgerTreff 3.Okt A)');
+      if (!name) return;
+      const eventId = parseInt(document.getElementById('vip_event_id').value || '1', 10);
+      const isDefault = confirm('Als Default für dieses Event setzen?');
+      const headers = buildAuthHeaders({ 'Content-Type': 'application/json' });
+      const vipKey = (document.getElementById('apikey')?.value || '').trim();
+      if (vipKey) headers['X-API-Key'] = vipKey;
+      try{
+        const layout = await collectVipLayout();
+        const res = await fetch(`${API_BASE}/vip/layout-presets`, { method:'POST', headers, body: JSON.stringify({ name, event_id: eventId, layout, is_default: isDefault }) });
+        const json = await res.json();
+        if (!res.ok || !json?.success) throw new Error(json?.message || `HTTP ${res.status}`);
+        showSuccess('Preset gespeichert');
+        await loadVipPresets();
+      }catch(e){ showError(e.message); }
+    }
+    async function loadVipPresets(){
+      clearMsg();
+      const key = document.getElementById('apikey').value.trim();
+      if (!getStoredToken() && !key) return showError('Bitte einloggen (Google) oder X-API-Key eintragen.');
+      const eventId = parseInt(document.getElementById('vip_event_id').value || '0', 10) || '';
+      try{
+        const headers = buildAuthHeaders();
+        const vipKey = (document.getElementById('apikey')?.value || '').trim();
+        if (vipKey) headers['X-API-Key'] = vipKey;
+        const res = await fetch(`${API_BASE}/vip/layout-presets${eventId?`?event_id=${eventId}`:''}`, { headers });
+        const json = await res.json();
+        if (!res.ok || !json?.success) throw new Error(json?.message || `HTTP ${res.status}`);
+        const panel = document.getElementById('vip_presets_panel'); const tbody = document.getElementById('vip_presets_tbody');
+        if (!panel || !tbody) return;
+        tbody.innerHTML = '';
+        (json.data||[]).forEach(p => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `<td>${p.name}</td><td>${p.event_id || '—'}</td><td>${p.is_default?'Ja':'Nein'}</td>`+
+            `<td style="display:flex;gap:6px">`+
+            `<button onclick="applyVipPreset(${p.id})">Übernehmen</button>`+
+            `<button onclick="deleteVipPreset(${p.id})">Löschen</button>`+
+            `</td>`;
+          tbody.appendChild(tr);
+        });
+        panel.style.display = '';
+        showSuccess(`${(json.data||[]).length} Preset(s) geladen`);
+      }catch(e){ showError(e.message); }
+    }
+    async function applyVipPreset(id){
+      try{
+        const headers = buildAuthHeaders();
+        const vipKey = (document.getElementById('apikey')?.value || '').trim();
+        if (vipKey) headers['X-API-Key'] = vipKey;
+        const res = await fetch(`${API_BASE}/vip/layout-presets`, { headers });
+        const json = await res.json();
+        const p = (json.data||[]).find(x=>x.id===id);
+        if (!p) return alert('Preset nicht gefunden');
+        const m = new Map(Object.entries(p.layout||{}));
+        const map = new Map([
+          ['marginTop','vip_marginTop'],['marginLeft','vip_marginLeft'],['cardWidth','vip_cardWidth'],['cardHeight','vip_cardHeight'],
+          ['vGap','vip_vGap'],['globalOffsetX','vip_globalOffsetX'],['globalOffsetY','vip_globalOffsetY'],
+          ['qrOffsetX','vip_qrOffsetX'],['qrOffsetY','vip_qrOffsetY'],['titleOffsetX','vip_titleOffsetX'],['titleOffsetY','vip_titleOffsetY'],
+          ['infoOffsetX','vip_infoOffsetX'],['infoOffsetY','vip_infoOffsetY']
+        ]);
+        map.forEach((inputId,key)=>{ const v = m.get(key); if (v!==undefined){ const el = document.getElementById(inputId); if(el) el.value = String(v); }});
+        const sb = document.getElementById('vip_showBoxes'); if (sb && 'showBoxes' in (p.layout||{})) sb.checked = !!p.layout.showBoxes;
+        showSuccess('Preset übernommen');
+      }catch(e){ showError(e.message); }
+    }
+    async function deleteVipPreset(id){
+      if(!confirm('Preset wirklich löschen?')) return;
+      try{
+        const headers = buildAuthHeaders();
+        const vipKey = (document.getElementById('apikey')?.value || '').trim();
+        if (vipKey) headers['X-API-Key'] = vipKey;
+        const res = await fetch(`${API_BASE}/vip/layout-presets/${id}`, { method:'DELETE', headers });
+        const json = await res.json();
+        if (!res.ok || !json?.success) throw new Error(json?.message || `HTTP ${res.status}`);
+        await loadVipPresets();
+      }catch(e){ showError(e.message); }
+    }
+    async function loadEventSettings(){
+      clearMsg();
+      const key = document.getElementById('apikey').value.trim();
+      if (!getStoredToken() && !key) return showError('Bitte einloggen (Google) oder X-API-Key eintragen.');
+      try {
+        const res = await fetch(`${API_BASE}/admin/event-settings`, { headers: buildAuthHeaders() });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`);
+        const e = data.data;
+        for (const id of ['name','description','event_date','location','event_time','doors_open_time','organizer_name','organizer_support_email','bank_account_holder','bank_iban','bank_bic','bank_name','total_capacity','seating_mode','order_prefix','allowed_origins']){
+          const el = document.getElementById(`ev_${id}`); if (el) el.value = e[id] || '';
+        }
+        showSuccess('Event-Settings geladen');
+      } catch(e){ showError(e.message); }
+    }
+
+    async function saveEventSettings(){
+      clearMsg();
+      const key = document.getElementById('apikey').value.trim();
+      if (!getStoredToken() && !key) return showError('Bitte einloggen (Google) oder X-API-Key eintragen.');
+      const body = {
+        name: document.getElementById('ev_name').value,
+        description: document.getElementById('ev_description').value,
+        event_date: document.getElementById('ev_event_date').value,
+        location: document.getElementById('ev_location').value,
+        event_time: document.getElementById('ev_event_time').value,
+        doors_open_time: document.getElementById('ev_doors_open_time').value,
+        organizer_name: document.getElementById('ev_organizer_name').value,
+        organizer_support_email: document.getElementById('ev_organizer_support_email').value,
+        bank_account_holder: document.getElementById('ev_bank_account_holder').value,
+        bank_iban: document.getElementById('ev_bank_iban').value,
+        bank_bic: document.getElementById('ev_bank_bic').value,
+        bank_name: document.getElementById('ev_bank_name').value,
+        total_capacity: parseInt(document.getElementById('ev_total_capacity').value || '0', 10)
+        ,seating_mode: document.getElementById('ev_seating_mode').value
+        ,order_prefix: document.getElementById('ev_order_prefix').value
+        ,allowed_origins: document.getElementById('ev_allowed_origins')?.value || ''
+      };
+      try {
+        const res = await fetch(`${API_BASE}/admin/event-settings`, { method: 'POST', headers: buildAuthHeaders({ 'Content-Type':'application/json' }), body: JSON.stringify(body) });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`);
+        showSuccess('Event-Settings gespeichert');
+      } catch(e){ showError(e.message); }
+    }
+
+    function toggleEvent(){
+      const el = document.getElementById('eventFields');
+      const btn = document.getElementById('toggleEventBtn');
+      if (!el || !btn) return;
+      const hidden = el.style.display === 'none';
+      el.style.display = hidden ? 'grid' : 'none';
+      btn.textContent = hidden ? 'Schließen' : 'Öffnen';
+    }
+
+    function toggleTypes(){
+      const el = document.getElementById('typesSection');
+      const btn = document.getElementById('toggleTypesBtn');
+      if (!el || !btn) return;
+      const hidden = el.style.display === 'none';
+      el.style.display = hidden ? 'block' : 'none';
+      btn.textContent = hidden ? 'Schließen' : 'Öffnen';
+    }
+
+    async function loadTicketTypes(){
+      clearMsg();
+      const key = document.getElementById('apikey').value.trim();
+      if (!getStoredToken() && !key) return showError('Bitte einloggen (Google) oder X-API-Key eintragen.');
+      try {
+        const res = await fetch(`${API_BASE}/admin/ticket-types`, { headers: buildAuthHeaders() });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`);
+        renderTicketTypes(data.data || []);
+        showSuccess('Ticket-Typen geladen');
+      } catch(e){ showError(e.message); }
+    }
+
+    function renderTicketTypes(types){
+      const tbody = document.querySelector('#types tbody');
+      tbody.innerHTML = '';
+      for (const t of types){
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td><input data-id="${t.id}" class="tt-name" value="${t.name}"/></td>
+          <td><input data-id="${t.id}" class="tt-desc" value="${t.description || ''}"/></td>
+          <td><input data-id="${t.id}" class="tt-price" type="number" step="0.01" value="${Number(t.price).toFixed(2)}"/></td>
+          <td><input data-id="${t.id}" class="tt-max" type="number" value="${t.max_quantity}"/></td>
+          <td><input data-id="${t.id}" class="tt-avail" type="number" value="${t.available_quantity}"/></td>
+          <td><input data-id="${t.id}" class="tt-active" type="checkbox" ${t.is_active ? 'checked' : ''}/></td>
+          <td style="display:flex; gap:6px">
+            <button onclick="saveOneType(${t.id})">Speichern</button>
+            <button onclick="deleteType(${t.id})">Löschen</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      }
+    }
+
+    async function saveOneType(id){
+      clearMsg();
+      const key = document.getElementById('apikey').value.trim();
+      if (!getStoredToken() && !key) return showError('Bitte einloggen (Google) oder X-API-Key eintragen.');
+      const row = document.querySelector(`#types tbody tr td button[onclick="saveOneType(${id})"]`).parentElement.parentElement;
+      const name = row.querySelector('.tt-name').value;
+      const description = row.querySelector('.tt-desc').value;
+      const price = parseFloat(row.querySelector('.tt-price').value);
+      const maxq = parseInt(row.querySelector('.tt-max').value, 10);
+      const avail = parseInt(row.querySelector('.tt-avail').value, 10);
+      const active = row.querySelector('.tt-active').checked;
+      try {
+        const res = await fetch(`${API_BASE}/admin/ticket-types/upsert`, { method: 'POST', headers: buildAuthHeaders({ 'Content-Type':'application/json' }), body: JSON.stringify({ id, name, description, price, max_quantity: maxq, available_quantity: avail, is_active: active }) });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`);
+        showSuccess('Ticket-Typ gespeichert');
+      } catch(e){ showError(e.message); }
+    }
+
+    async function createType(){
+      clearMsg();
+      const key = document.getElementById('apikey').value.trim();
+      if (!getStoredToken() && !key) return showError('Bitte einloggen (Google) oder X-API-Key eintragen.');
+      const name = prompt('Name des neuen Ticket-Typs (z. B. Standard, Ermäßigt, VIP)');
+      if (!name) return;
+      try {
+        const res = await fetch(`${API_BASE}/admin/ticket-types/upsert`, { method: 'POST', headers: buildAuthHeaders({ 'Content-Type':'application/json' }), body: JSON.stringify({ name }) });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`);
+        await loadTicketTypes();
+        showSuccess('Ticket-Typ erstellt');
+      } catch(e){ showError(e.message); }
+    }
+
+    async function deleteType(id){
+      clearMsg();
+      const key = document.getElementById('apikey').value.trim();
+      if (!getStoredToken() && !key) return showError('Bitte einloggen (Google) oder X-API-Key eintragen.');
+      if (!confirm('Diesen Ticket-Typ wirklich löschen? (Nur möglich, wenn keine Tickets existieren)')) return;
+      try {
+        const res = await fetch(`${API_BASE}/admin/ticket-types/${id}`, { method:'DELETE', headers: buildAuthHeaders() });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`);
+        await loadTicketTypes();
+        showSuccess('Ticket-Typ gelöscht');
+      } catch(e){ showError(e.message); }
+    }
+
+    async function resetAvail(){
+      clearMsg();
+      const key = document.getElementById('apikey').value.trim();
+      if (!getStoredToken() && !key) return showError('Bitte einloggen (Google) oder X-API-Key eintragen.');
+      if (!confirm('Verfügbarkeiten aus Max - verkaufte Tickets neu berechnen?')) return;
+      try {
+        const res = await fetch(`${API_BASE}/admin/ticket-types/reset-available`, { method:'POST', headers: buildAuthHeaders() });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`);
+        await loadTicketTypes();
+        showSuccess('Verfügbarkeiten neu berechnet');
+      } catch(e){ showError(e.message); }
+    }
+
+    function handleProviderLogin(provider){
+      // Neuer OAuth-Flow gemäß INTEGRATION_GUIDE.md
+      // WICHTIG: Vollständige HTTPS-URL als returnUrl verwenden!
+      const returnUrl = `${location.origin}${location.pathname}`;
+      
+      // State-Objekt mit Return-URL und Privacy-Consent
+      const stateObj = {
+        returnUrl: returnUrl, // ← Vollständige URL mit https://
+        origin: location.origin,
+        mode: 'redirect',
+        privacy_consent: {
+          accepted: true,
+          timestamp: new Date().toISOString()
+        }
+      };
+      
+      // Debug: Console-Ausgabe für Debugging
+      console.log('🔐 Login Debug:', {
+        provider: provider,
+        returnUrl: returnUrl,
+        fullUrl: `${location.protocol}//${location.host}${location.pathname}`,
+        origin: location.origin,
+        stateObj: stateObj,
+        authBase: AUTH_BASE
+      });
+      
+      // Validierung: returnUrl muss mit https:// beginnen
+      if (!returnUrl.startsWith('https://') && !returnUrl.startsWith('http://localhost')) {
+        console.error('❌ Invalid returnUrl:', returnUrl);
+        alert('Fehler: returnUrl muss mit https:// beginnen!');
+        return;
+      }
+      
+      // Base64url encoding (RFC 4648 §5)
+      const stateB64 = btoa(unescape(encodeURIComponent(JSON.stringify(stateObj))))
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
+      
+      const authUrl = `${AUTH_BASE}/auth/oauth/${provider}?state=${stateB64}`;
+      console.log('🔐 State Base64url:', stateB64);
+      console.log('🔐 Redirecting to:', authUrl);
+      
+      // Redirect zum Auth-Baustein
+      window.location.href = authUrl;
+    }
+    
+    // Kompatibilität: Alte Funktion beibehalten
+    function doGoogleLogin(){ handleProviderLogin('google'); }
+    function logout(){ clearStoredToken(); setAuthVisibility(false); showSuccess('Abgemeldet'); }
+
+    window.addEventListener('message', (ev) => {
+      try {
+        if (!ev || !ev.data || ev.data.type !== 'auth_token') return;
+        if (!ev.data.token) return;
+        setStoredToken(String(ev.data.token));
+        showSuccess('Token per Login übernommen');
+        renderAuthState();
+      } catch {}
+    });
+
+    async function createTenant(){
+      clearMsg();
+      const name = (document.getElementById('tenant_new_name')?.value || '').trim();
+      if (!name) return showError('Bitte einen Namen für den Veranstalter eingeben.');
+      const token = getStoredToken();
+      if (!token) return showError('Bitte zuerst einloggen.');
+      try{
+        const res = await fetch(`${AUTH_BASE}/auth/tenants`, { method:'POST', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type':'application/json' }, body: JSON.stringify({ name }) });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`);
+        showSuccess('Veranstalter angelegt');
+        await loadTenantsInfo();
+      } catch(e){ showError(e.message); }
+    }
+
+    async function listEvents(){
+      clearMsg();
+      const token = getStoredToken();
+      if (!token) return showError('Bitte zuerst einloggen.');
+      try{
+        const res = await fetch(`${API_BASE}/admin/events`, { headers: buildAuthHeaders() });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`);
+        const ul = document.getElementById('eventsList'); if (ul) ul.innerHTML='';
+        (data.data||[]).forEach(ev => {
+          const li = document.createElement('li');
+          const btn = document.createElement('button');
+          btn.textContent = 'Aktiv setzen';
+          btn.style.marginLeft = '8px';
+          btn.onclick = () => {
+            const f = document.getElementById('event_select'); if (f) f.value = ev.id;
+            showSuccess(`Aktives Event: ${ev.name} (#${ev.id})`);
+          };
+          li.textContent = `${ev.name} (#${ev.id}) – ${ev.event_date || ''}`;
+          li.appendChild(btn);
+          ul.appendChild(li);
+        });
+        showSuccess(`${(data.data || []).length} Event(s) gefunden`);
+        // Wenn kein aktives Event gesetzt, erstes vorschlagen
+        const f = document.getElementById('event_select');
+        if (f && !f.value && (data.data||[])[0]) f.value = (data.data||[])[0].id;
+      } catch(e){ showError(e.message); }
+    }
+
+    async function createNewEvent(){
+      clearMsg();
+      const name = (document.getElementById('new_event_name')?.value || '').trim();
+      const event_date = (document.getElementById('new_event_date')?.value || '').trim();
+      const location = (document.getElementById('new_event_location')?.value || '').trim();
+      if (!name || !event_date) return showError('Name und Datum erforderlich.');
+      try{
+        const res = await fetch(`${API_BASE}/admin/events`, { method:'POST', headers: buildAuthHeaders({ 'Content-Type':'application/json' }), body: JSON.stringify({ name, event_date, location }) });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`);
+        showSuccess('Event angelegt');
+        try{ const f = document.getElementById('event_select'); if (f) f.value = data.data.id; }catch(_){ }
+        await listEvents();
+      } catch(e){ showError(e.message); }
+    }
+    // Fehler aus Popup-Flow entgegennehmen
+    window.addEventListener('message', (ev) => {
+      try {
+        if (!ev || !ev.data || ev.data.type !== 'auth_error') return;
+        const msg = String(ev.data.message || 'Authentifizierung fehlgeschlagen');
+        showError(msg);
+      } catch {}
+    });
+
+    window.addEventListener('DOMContentLoaded', () => {
+      const t = getStoredToken(); const el = document.getElementById('jwt'); if (el) el.value = t;
+      renderAuthState();
+      // Token/Fehler automatisch aus URL übernehmen: bevorzugt #token=..., danach entfernen
+      const fromHash = (location.hash || '').replace(/^#/, '');
+      const fromQuery = (location.search || '').replace(/^\?/, '');
+      const paramsFromHash = new URLSearchParams(fromHash);
+      let urlToken = normalizeToken(paramsFromHash.get('token'));
+      const urlError = paramsFromHash.get('error');
+      if (!urlToken) {
+        const paramsFromQuery = new URLSearchParams(fromQuery);
+        urlToken = normalizeToken(paramsFromQuery.get('token'));
+      }
+      if (urlToken && urlToken !== getStoredToken()) {
+        setStoredToken(urlToken);
+        // Token aus der Adresszeile entfernen
+        try { history.replaceState(null, document.title, location.pathname); } catch(_) {}
+        showSuccess('Token übernommen');
+        renderAuthState();
+      } else if (urlError) {
+        try { history.replaceState(null, document.title, location.pathname); } catch(_) {}
+        showError(urlError === 'domain_not_allowed' ? 'Diese Google-Adresse ist nicht autorisiert.' : 'Authentifizierung fehlgeschlagen.');
+      }
+    });
+
+    async function loadTenantsInfo(){
+      const token = getStoredToken();
+      if (!token) { const ti = document.getElementById('tenant_info'); if (ti) ti.value=''; return; }
+      try {
+        const res = await fetch(`${AUTH_BASE}/auth/tenants`, { headers: { 'Authorization': `Bearer ${token}` } });
+        const data = await res.json().catch(() => ({ success:false }));
+        if (res.ok && data && data.success) {
+          const names = (data.data || []).map(t => `${t.name} (#${t.id})`).join(', ');
+          const ti = document.getElementById('tenant_info'); if (ti) ti.value = names || '—';
+        }
+      } catch(_){ }
+    }
+  </script>
+</head>
+<body>
+  <h1>Admin – Ticketverwaltung</h1>
+  <div class="row">
+    <button onclick="handleProviderLogin('google')">🔐 Mit Google anmelden</button>
+    <button onclick="handleProviderLogin('github')">🔐 Mit GitHub anmelden</button>
+    <button onclick="handleProviderLogin('microsoft')">🔐 Mit Microsoft anmelden</button>
+    <button onclick="logout()">Logout</button>
+    <span id="authinfo" class="muted"></span>
+  </div>
+  <div class="row">
+    <input id="jwt" type="password" placeholder="JWT hier einkleben (optional)" style="min-width:320px" />
+  </div>
+  <div class="row" id="userRow">
+    <input id="user_email" placeholder="Admin E-Mail" readonly style="min-width:260px;background:#f8fafc" />
+    <input id="tenant_info" placeholder="Tenant(s)" readonly style="min-width:260px;background:#f8fafc" />
+  </div>
+  <div class="row">
+    <input id="apikey" type="password" placeholder="X-API-Key (Fallback)" style="min-width:320px" />
+    <input id="tenant_select" placeholder="Tenant-ID (optional)" style="width:180px" />
+    <button id="load" onclick="fetchOrders()">Bestellungen laden</button>
+    <span id="count" class="muted"></span>
+  </div>
+
+  <div class="row">
+    <input id="order" type="text" placeholder="Bestellnummer (z. B. ROT-...)" style="min-width:320px" />
+    <button id="confirm" onclick="confirmPayment()">Zahlung bestätigen & Tickets versenden</button>
+  </div>
+
+  <div id="msg" class="muted"></div>
+
+  <h2>Event-Einstellungen</h2>
+  <div class="row" id="tenantBlock">
+    <input id="tenant_new_name" placeholder="Neuer Veranstalter (Tenant) – Name" />
+    <button onclick="createTenant()">Veranstalter anlegen</button>
+    <button onclick="listEvents()">Events des Tenants laden</button>
+    <input id="event_select" placeholder="Aktives Event-ID (optional)" style="width:200px" />
+  </div>
+  <div class="row" id="eventsRow">
+    <input id="new_event_name" placeholder="Neues Event – Name" />
+    <input id="new_event_date" placeholder="Datum (YYYY-MM-DD)" />
+    <input id="new_event_location" placeholder="Ort" />
+    <button onclick="createNewEvent()">Event anlegen</button>
+  </div>
+  <div class="row">
+    <button onclick="loadEventSettings()">Laden</button>
+    <button onclick="saveEventSettings()">Speichern</button>
+    <button id="toggleEventBtn" onclick="toggleEvent()">Schließen</button>
+  </div>
+  <div id="eventFields" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;max-width:900px">
+    <input id="ev_name" placeholder="Event-Name (z. B. Rotary Benefizshow 2026)" />
+    <input id="ev_event_date" placeholder="Datum (YYYY-MM-DD)" />
+    <input id="ev_event_time" placeholder="Uhrzeit (z. B. 18:00 Uhr)" />
+    <input id="ev_doors_open_time" placeholder="Einlass (z. B. ab 17:30 Uhr)" />
+    <input id="ev_location" placeholder="Ort (z. B. Dülmen)" />
+    <input id="ev_total_capacity" placeholder="Gesamtkapazität (z. B. 400)" />
+    <select id="ev_seating_mode">
+      <option value="freie_platzwahl">Freie Platzwahl</option>
+      <option value="reserviert">Reservierte Plätze</option>
+    </select>
+    <input id="ev_order_prefix" placeholder="Bestellnummer Präfix (z. B. BEN-26)" />
+    <input id="ev_organizer_name" placeholder="Organisator (z. B. Rotary Club Dülmen)" />
+    <input id="ev_organizer_support_email" placeholder="Support-E-Mail" />
+    <input id="ev_bank_account_holder" placeholder="Kontoinhaber" />
+    <input id="ev_bank_iban" placeholder="IBAN" />
+    <input id="ev_bank_bic" placeholder="BIC" />
+    <input id="ev_bank_name" placeholder="Bankname" />
+    <input id="ev_description" placeholder="Beschreibung" />
+    <input id="ev_allowed_origins" placeholder="Erlaubte Origins (Komma-getrennt)" />
+  </div>
+  <div>
+    <ul id="eventsList"></ul>
+  </div>
+
+  <h2>Ticket-Typen</h2>
+  <div class="row">
+    <button onclick="loadTicketTypes()">Ticket-Typen laden</button>
+    <button onclick="createType()">Neuen Ticket-Typ anlegen</button>
+    <button onclick="resetAvail()">Kontingente neu berechnen</button>
+    <button id="toggleTypesBtn" onclick="toggleTypes()">Schließen</button>
+  </div>
+  <div id="typesSection">
+  <table id="types">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Beschreibung</th>
+        <th>Preis</th>
+        <th>Max</th>
+        <th>Verfügbar</th>
+        <th>Aktiv</th>
+        <th>Aktion</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+  
+  <h2>VIP-Druck (A4, 4 Karten/Seite)</h2>
+  <div class="row">
+    <input id="vip_count" type="number" min="1" max="500" placeholder="Anzahl VIP-Tickets" style="width:200px" />
+    <input id="vip_event_id" type="number" min="1" placeholder="Event-ID (z. B. 1)" style="width:160px" />
+    <select id="vip_template">
+      <option value="builtin">Ohne Template (leer)</option>
+      <option value="uploaded">Template aus /public/vip-print-template.pdf</option>
+    </select>
+    <input id="vip_notes" placeholder="Notiz (z. B. Verein/Empfänger)" style="min-width:240px" />
+    <button onclick="generateVipPrintPdf()">PDF erzeugen</button>
+    <button onclick="saveVipPreset()" title="Aktuelles Layout als Preset speichern">Preset speichern</button>
+    <button onclick="loadVipPresets()" title="Presets laden">Presets laden</button>
+    <button onclick="loadDefaultVipLayout()" title="Default-Layout für Event laden">Default laden</button>
+  </div>
+  <div class="row">
+    <input id="vip_marginTop" type="number" step="0.1" placeholder="marginTop (mm)" style="width:140px" />
+    <input id="vip_marginLeft" type="number" step="0.1" placeholder="marginLeft (mm)" style="width:140px" />
+    <input id="vip_cardWidth" type="number" step="0.1" placeholder="cardWidth (mm)" style="width:140px" />
+    <input id="vip_cardHeight" type="number" step="0.1" placeholder="cardHeight (mm)" style="width:140px" />
+    <input id="vip_vGap" type="number" step="0.1" placeholder="vGap (mm)" style="width:120px" />
+    <input id="vip_globalOffsetX" type="number" step="0.1" placeholder="globalOffsetX (mm)" style="width:160px" />
+    <input id="vip_globalOffsetY" type="number" step="0.1" placeholder="globalOffsetY (mm)" style="width:160px" />
+  </div>
+  <div class="row">
+    <input id="vip_qrOffsetX" type="number" step="0.1" placeholder="qrOffsetX (mm)" style="width:140px" />
+    <input id="vip_qrOffsetY" type="number" step="0.1" placeholder="qrOffsetY (mm)" style="width:140px" />
+    <input id="vip_titleOffsetX" type="number" step="0.1" placeholder="titleOffsetX (mm)" style="width:150px" />
+    <input id="vip_titleOffsetY" type="number" step="0.1" placeholder="titleOffsetY (mm)" style="width:150px" />
+    <input id="vip_infoOffsetX" type="number" step="0.1" placeholder="infoOffsetX (mm)" style="width:140px" />
+    <input id="vip_infoOffsetY" type="number" step="0.1" placeholder="infoOffsetY (mm)" style="width:140px" />
+    <label style="display:flex;align-items:center;gap:6px"><input id="vip_showBoxes" type="checkbox"/> Rahmen anzeigen</label>
+  </div>
+  <div class="muted">Tipp: Bei erstem Druck ggf. leichte Korrekturen (mm) setzen, bis es exakt passt.</div>
+  <div id="vip_presets_panel" style="margin-top:8px;display:none">
+    <table style="width:100%"><thead><tr><th style="width:40%">Name</th><th>Event</th><th>Default</th><th>Aktion</th></tr></thead><tbody id="vip_presets_tbody"></tbody></table>
+  </div>
+  </div>
+  
+
+  <table id="orders">
+    <thead>
+      <tr>
+        <th>Bestellnummer</th>
+        <th>E-Mail</th>
+        <th>Summe</th>
+        <th>Anz. Tickets</th>
+        <th>Status</th>
+        <th>Erstellt</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+  <!-- Quiz Admin Sektion (MVP) -->
+  <section id="quiz-admin" style="margin-top:40px;">
+    <h2>Quiz-Baustein</h2>
+    <div style="display:flex; gap:16px; flex-wrap:wrap;">
+      <input id="quiz_title" placeholder="Titel (z. B. Benefizshow‑Quiz)" title="Name des Quiz – erscheint öffentlich" />
+      <input id="quiz_topic" placeholder="Thema (z. B. Münsterland, Rotary)" title="Inhaltlicher Fokus – wird an KI übergeben" />
+      <input id="quiz_qcount" type="number" min="1" max="20" value="5" title="Anzahl der Fragen" />
+      <input id="quiz_timer" type="number" min="10" max="600" value="60" title="Zeitlimit pro Session in Sekunden" />
+      <input id="quiz_winners" type="number" min="0" max="50" value="2" title="Anzahl der Gewinner für die spätere Ziehung" />
+      <button onclick="adminCreateQuiz()">Quiz anlegen</button>
+      <button onclick="adminSaveQuiz()">Quiz speichern</button>
+      <input id="quiz_id" placeholder="Quiz ID" style="width:100px;" />
+      <button onclick="adminGenerateQuestions()">Fragen generieren</button>
+      <button onclick="adminDrawWinners()">Gewinner ziehen</button>
+      <button onclick="adminIssueTickets()">Gewinner‑Tickets ausstellen</button>
+      <button onclick="adminLoadResults()">Ergebnisse laden</button>
+      <button onclick="adminListQuestions()">Fragen anzeigen</button>
+      <button onclick="adminAddQuestion()">+ Frage hinzufügen</button>
+      <button onclick="adminPublishQuiz()">Veröffentlichen</button>
+      <button onclick="adminUnpublishQuiz()">Zurückziehen</button>
+      <button onclick="adminRunQuiz()">In Spielbetrieb setzen</button>
+      <button onclick="adminStopQuiz()">Spielbetrieb stoppen</button>
+    </div>
+    <div class="muted" style="margin:6px 0 12px 0">Hinweis: „Fragen generieren“ nutzt Ollama (falls konfiguriert) oder Groq (wenn GROQ_API_KEY gesetzt) und erzeugt Entwürfe (Status „generated“). Prüfen/ändern Sie die Fragen und klicken Sie auf „Veröffentlichen“, damit das Quiz spielbar ist.</div>
+    <div id="quiz_status_bar" class="muted" style="margin:0 0 8px 0"></div>
+    <pre id="quiz_admin_log" style="background:#111;color:#0f0;padding:12px;white-space:pre-wrap;max-height:260px;overflow:auto;"></pre>
+    <div id="quiz_questions_panel" style="margin-top:12px; display:none">
+      <table id="quiz_questions_table" style="width:100%; border-collapse: collapse;">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Frage</th>
+            <th>Antworten [1..4]</th>
+            <th>Korrekt</th>
+            <th>Aktion</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+  <script>
+    async function adminCreateQuiz(){
+      const body = {
+        title: document.getElementById('quiz_title').value || 'Quiz',
+        topic: document.getElementById('quiz_topic').value || '',
+        question_count: parseInt(document.getElementById('quiz_qcount').value || '5',10),
+        time_limit_s: parseInt(document.getElementById('quiz_timer').value || '60',10),
+        winners_count: parseInt(document.getElementById('quiz_winners').value || '0',10)
+      };
+      const headers = buildAuthHeaders({ 'Content-Type': 'application/json' });
+      const res = await fetch(API_BASE + '/quiz', { method:'POST', headers, body: JSON.stringify(body) });
+      const json = await res.json();
+      document.getElementById('quiz_admin_log').textContent = JSON.stringify(json,null,2);
+      if(json?.data?.id) document.getElementById('quiz_id').value = json.data.id;
+    }
+    async function loadDefaultVipLayout(){
+      clearMsg();
+      const key = document.getElementById('apikey').value.trim();
+      if (!getStoredToken() && !key) return showError('Bitte einloggen (Google) oder X-API-Key eintragen.');
+      const eventId = parseInt(document.getElementById('vip_event_id').value || '0', 10);
+      if (!eventId) return showError('Bitte Event-ID angeben');
+      try{
+        const headers = buildAuthHeaders();
+        const vipKey = (document.getElementById('apikey')?.value || '').trim();
+        if (vipKey) headers['X-API-Key'] = vipKey;
+        const res = await fetch(`${API_BASE}/vip/default-layout?event_id=${eventId}`, { headers });
+        const json = await res.json();
+        if (!res.ok || !json?.success) throw new Error(json?.message || `HTTP ${res.status}`);
+        const layout = json.data || {};
+        const map = new Map([
+          ['marginTop','vip_marginTop'],['marginLeft','vip_marginLeft'],['cardWidth','vip_cardWidth'],['cardHeight','vip_cardHeight'],
+          ['vGap','vip_vGap'],['globalOffsetX','vip_globalOffsetX'],['globalOffsetY','vip_globalOffsetY'],
+          ['qrOffsetX','vip_qrOffsetX'],['qrOffsetY','vip_qrOffsetY'],['titleOffsetX','vip_titleOffsetX'],['titleOffsetY','vip_titleOffsetY'],
+          ['infoOffsetX','vip_infoOffsetX'],['infoOffsetY','vip_infoOffsetY']
+        ]);
+        map.forEach((inputId,key)=>{ const v = layout[key]; if (v!==undefined){ const el = document.getElementById(inputId); if(el) el.value = String(v); }});
+        const sb = document.getElementById('vip_showBoxes'); if (sb && 'showBoxes' in layout) sb.checked = !!layout.showBoxes;
+        showSuccess('Default-Layout geladen');
+      }catch(e){ showError(e.message); }
+    }
+    async function adminGenerateQuestions(){
+      const id = document.getElementById('quiz_id').value;
+      if(!id) return alert('Quiz ID fehlt');
+      const headers = buildAuthHeaders({ 'Content-Type': 'application/json' });
+      const res = await fetch(`${API_BASE}/quiz/${id}/generate`, { method:'POST', headers });
+      const json = await res.json();
+      document.getElementById('quiz_admin_log').textContent = JSON.stringify(json,null,2);
+    }
+    async function adminDrawWinners(){
+      const id = document.getElementById('quiz_id').value;
+      if(!id) return alert('Quiz ID fehlt');
+      const headers = buildAuthHeaders({ 'Content-Type': 'application/json' });
+      const res = await fetch(`${API_BASE}/quiz/${id}/draw`, { method:'POST', headers });
+      const json = await res.json();
+      document.getElementById('quiz_admin_log').textContent = JSON.stringify(json,null,2);
+    }
+    async function adminIssueTickets(){
+      const id = document.getElementById('quiz_id').value;
+      if(!id) return alert('Quiz ID fehlt');
+      const headers = buildAuthHeaders({ 'Content-Type': 'application/json' });
+      const res = await fetch(`${API_BASE}/quiz/${id}/issue-tickets`, { method:'POST', headers, body: JSON.stringify({}) });
+      const json = await res.json();
+      document.getElementById('quiz_admin_log').textContent = JSON.stringify(json,null,2);
+    }
+    async function adminLoadResults(){
+      const id = document.getElementById('quiz_id').value;
+      if(!id) return alert('Quiz ID fehlt');
+      const headers = buildAuthHeaders({ 'Content-Type': 'application/json' });
+      const res = await fetch(`${API_BASE}/quiz/${id}/results`, { headers });
+      const json = await res.json();
+      document.getElementById('quiz_admin_log').textContent = JSON.stringify(json,null,2);
+    }
+    async function adminSaveQuiz(){
+      const id = document.getElementById('quiz_id').value;
+      if(!id) return alert('Quiz ID fehlt');
+      const body = {
+        title: document.getElementById('quiz_title').value,
+        topic: document.getElementById('quiz_topic').value,
+        question_count: parseInt(document.getElementById('quiz_qcount').value||'0',10),
+        time_limit_s: parseInt(document.getElementById('quiz_timer').value||'0',10),
+        winners_count: parseInt(document.getElementById('quiz_winners').value||'0',10)
+      };
+      const headers = buildAuthHeaders({ 'Content-Type': 'application/json' });
+      const res = await fetch(`${API_BASE}/quiz/${id}`, { method:'POST', headers, body: JSON.stringify(body) });
+      const json = await res.json();
+      document.getElementById('quiz_admin_log').textContent = JSON.stringify(json,null,2);
+    }
+    async function refreshActiveQuiz(){
+      try{
+        const res = await fetch(`${API_BASE}/quiz/active`, { headers: buildAuthHeaders() });
+        const json = await res.json().catch(()=>({}));
+        const bar = document.getElementById('quiz_status_bar');
+        if (res.ok && json?.data) {
+          bar.textContent = `Aktiv: #${json.data.id} – ${json.data.title}`;
+        } else {
+          bar.textContent = 'Aktiv: keines';
+        }
+      }catch(_){ }
+    }
+    async function adminListQuestions(){
+      const id = document.getElementById('quiz_id').value;
+      if(!id) return alert('Quiz ID fehlt');
+      const headers = buildAuthHeaders();
+      const res = await fetch(`${API_BASE}/quiz/${id}/questions`, { headers });
+      const json = await res.json();
+      if(!res.ok || !json?.success) { document.getElementById('quiz_admin_log').textContent = JSON.stringify(json,null,2); return; }
+      const panel = document.getElementById('quiz_questions_panel');
+      const tbody = document.querySelector('#quiz_questions_table tbody');
+      tbody.innerHTML = '';
+      (json.data||[]).forEach(q => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td style="vertical-align:top"><input style="width:48px" value="${q.idx}" data-qid="${q.id}" class="q-idx" /></td>
+          <td style="vertical-align:top"><textarea rows="2" style="width:100%" class="q-question" data-qid="${q.id}">${q.question || ''}</textarea></td>
+          <td style="vertical-align:top">
+            ${(q.choices||[]).map((c,i)=>`<div style=\"display:flex;gap:6px;align-items:center\">`
+              + `<span style=\"width:18px;text-align:center;color:#6b7280\">${i+1}</span>`
+              + `<input type=\"radio\" name=\"q-correct-${q.id}\" value=\"${i+1}\" ${Number(q.correct_index)+1===i+1?'checked':''} />`
+              + `<input style=\"width:100%\" class=\"q-choice q-choice-${i}\" data-qid=\"${q.id}\" data-i=\"${i}\" value=\"${String(c).replace(/\"/g,'&quot;')}\" />`
+              + `</div>`).join('')}
+          </td>
+          <td style="vertical-align:top;min-width:110px">Richtig markieren</td>
+          <td style="vertical-align:top; display:flex; gap:6px; align-items:flex-start">
+            <button onclick="adminUpdateQuestion(${q.id})">Speichern</button>
+            <button onclick="adminRegenerateQuestion(${q.id})">Neu generieren</button>
+            <button onclick="adminDeleteQuestion(${q.id})">Löschen</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+      panel.style.display = '';
+      document.getElementById('quiz_admin_log').textContent = 'Fragen geladen';
+    }
+    async function adminUpdateQuestion(qid){
+      const id = document.getElementById('quiz_id').value;
+      if(!id) return alert('Quiz ID fehlt');
+      const row = [...document.querySelectorAll('#quiz_questions_table tbody tr')].find(tr => tr.querySelector(`button[onclick="adminUpdateQuestion(${qid})"]`));
+      if(!row) return alert('Zeile nicht gefunden');
+      const idx = parseInt(row.querySelector('.q-idx').value||'0',10);
+      const question = row.querySelector('.q-question').value;
+      const choices = [0,1,2,3].map(i => (row.querySelector(`.q-choice-${i}`)?.value || '').trim());
+      const correct_radio = row.querySelector(`input[name="q-correct-${qid}"]:checked`);
+      // Admin UI ist 1-basiert → Server erwartet Flag one_based=true für sichere Normalisierung
+      const correct_index = correct_radio ? parseInt(correct_radio.value,10) : 1;
+      if (!Array.isArray(choices) || choices.length !== 4) return alert('Es werden genau 4 Antworten benötigt.');
+      const headers = buildAuthHeaders({ 'Content-Type': 'application/json' });
+      const res = await fetch(`${API_BASE}/quiz/${id}/questions/${qid}`, { method:'POST', headers, body: JSON.stringify({ idx, question, choices, correct_index, one_based: true }) });
+      const json = await res.json();
+      document.getElementById('quiz_admin_log').textContent = JSON.stringify(json,null,2);
+      if (res.ok && json?.success) { await adminListQuestions(); }
+    }
+    async function adminPublishQuiz(){
+      const id = document.getElementById('quiz_id').value;
+      if(!id) return alert('Quiz ID fehlt');
+      const headers = buildAuthHeaders({ 'Content-Type': 'application/json' });
+      const res = await fetch(`${API_BASE}/quiz/${id}/publish`, { method:'POST', headers });
+      const json = await res.json();
+      document.getElementById('quiz_admin_log').textContent = JSON.stringify(json,null,2);
+      refreshActiveQuiz();
+    }
+    async function adminUnpublishQuiz(){
+      const id = document.getElementById('quiz_id').value;
+      if(!id) return alert('Quiz ID fehlt');
+      const headers = buildAuthHeaders({ 'Content-Type': 'application/json' });
+      const res = await fetch(`${API_BASE}/quiz/${id}/unpublish`, { method:'POST', headers });
+      const json = await res.json();
+      document.getElementById('quiz_admin_log').textContent = JSON.stringify(json,null,2);
+      refreshActiveQuiz();
+    }
+    async function adminRunQuiz(){
+      const id = document.getElementById('quiz_id').value;
+      if(!id) return alert('Quiz ID fehlt');
+      const headers = buildAuthHeaders({ 'Content-Type': 'application/json' });
+      const res = await fetch(`${API_BASE}/quiz/${id}/run`, { method:'POST', headers });
+      const json = await res.json();
+      document.getElementById('quiz_admin_log').textContent = JSON.stringify(json,null,2);
+      refreshActiveQuiz();
+    }
+    async function adminStopQuiz(){
+      const id = document.getElementById('quiz_id').value;
+      if(!id) return alert('Quiz ID fehlt');
+      const headers = buildAuthHeaders({ 'Content-Type': 'application/json' });
+      const res = await fetch(`${API_BASE}/quiz/${id}/stop`, { method:'POST', headers });
+      const json = await res.json();
+      document.getElementById('quiz_admin_log').textContent = JSON.stringify(json,null,2);
+      refreshActiveQuiz();
+    }
+    async function adminAddQuestion(){
+      const id = document.getElementById('quiz_id').value;
+      if(!id) return alert('Quiz ID fehlt');
+      const headers = buildAuthHeaders({ 'Content-Type': 'application/json' });
+      const res = await fetch(`${API_BASE}/quiz/${id}/questions`, { method:'POST', headers, body: JSON.stringify({}) });
+      const json = await res.json();
+      document.getElementById('quiz_admin_log').textContent = JSON.stringify(json,null,2);
+      if(res.ok && json?.success) adminListQuestions();
+    }
+    async function adminDeleteQuestion(qid){
+      if(!confirm('Frage wirklich löschen?')) return;
+      const id = document.getElementById('quiz_id').value;
+      if(!id) return alert('Quiz ID fehlt');
+      const headers = buildAuthHeaders();
+      const res = await fetch(`${API_BASE}/quiz/${id}/questions/${qid}`, { method:'DELETE', headers });
+      const json = await res.json();
+      document.getElementById('quiz_admin_log').textContent = JSON.stringify(json,null,2);
+      if(res.ok && json?.success) adminListQuestions();
+    }
+    async function adminRegenerateQuestion(qid){
+      const id = document.getElementById('quiz_id').value;
+      if(!id) return alert('Quiz ID fehlt');
+      const headers = buildAuthHeaders({ 'Content-Type': 'application/json' });
+      const res = await fetch(`${API_BASE}/quiz/${id}/questions/${qid}/regenerate`, { method:'POST', headers, body: JSON.stringify({}) });
+      const json = await res.json();
+      document.getElementById('quiz_admin_log').textContent = JSON.stringify(json,null,2);
+      if(res.ok && json?.success) adminListQuestions();
+    }
+  </script>
+</body>
+</html>
+
+
