@@ -128,11 +128,20 @@ router.get('/oauth/google/callback', async (req, res) => {
     // Parse state for privacy consent
     let state = {};
     try {
+      console.log('📦 Raw state parameter:', stateRaw);
+      
       // Decode base64url manually (replace - with +, _ with /, add padding)
       const base64 = stateRaw.replace(/-/g, '+').replace(/_/g, '/');
       const padded = base64 + '='.repeat((4 - base64.length % 4) % 4);
-      state = JSON.parse(Buffer.from(padded, 'base64').toString('utf8'));
-    } catch {
+      const decoded = Buffer.from(padded, 'base64').toString('utf8');
+      
+      console.log('📦 Decoded state:', decoded);
+      
+      state = JSON.parse(decoded);
+      
+      console.log('📦 Parsed state object:', JSON.stringify(state, null, 2));
+    } catch (err) {
+      console.error('⚠️ State parsing error:', err.message);
       state = { nonce: stateRaw };
     }
 
@@ -211,11 +220,20 @@ router.get('/oauth/github/callback', async (req, res) => {
     // Parse state for privacy consent
     let state = {};
     try {
+      console.log('📦 Raw state parameter:', stateRaw);
+      
       // Decode base64url manually (replace - with +, _ with /, add padding)
       const base64 = stateRaw.replace(/-/g, '+').replace(/_/g, '/');
       const padded = base64 + '='.repeat((4 - base64.length % 4) % 4);
-      state = JSON.parse(Buffer.from(padded, 'base64').toString('utf8'));
-    } catch {
+      const decoded = Buffer.from(padded, 'base64').toString('utf8');
+      
+      console.log('📦 Decoded state:', decoded);
+      
+      state = JSON.parse(decoded);
+      
+      console.log('📦 Parsed state object:', JSON.stringify(state, null, 2));
+    } catch (err) {
+      console.error('⚠️ State parsing error:', err.message);
       state = { nonce: stateRaw };
     }
 
@@ -322,11 +340,20 @@ router.get('/oauth/microsoft/callback', async (req, res) => {
     // Parse state for privacy consent
     let state = {};
     try {
+      console.log('📦 Raw state parameter:', stateRaw);
+      
       // Decode base64url manually (replace - with +, _ with /, add padding)
       const base64 = stateRaw.replace(/-/g, '+').replace(/_/g, '/');
       const padded = base64 + '='.repeat((4 - base64.length % 4) % 4);
-      state = JSON.parse(Buffer.from(padded, 'base64').toString('utf8'));
-    } catch {
+      const decoded = Buffer.from(padded, 'base64').toString('utf8');
+      
+      console.log('📦 Decoded state:', decoded);
+      
+      state = JSON.parse(decoded);
+      
+      console.log('📦 Parsed state object:', JSON.stringify(state, null, 2));
+    } catch (err) {
+      console.error('⚠️ State parsing error:', err.message);
       state = { nonce: stateRaw };
     }
 

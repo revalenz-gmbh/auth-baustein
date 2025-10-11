@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Benefizshow - Login erfolgreich</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    
+    .callback-container {
+      background: white;
+      border-radius: 16px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      padding: 40px;
+      max-width: 600px;
+      width: 100%;
+      text-align: center;
+    }
+    
+    .spinner {
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #667eea;
+      border-radius: 50%;
+      width: 50px;
+      height: 50px;
+      animation: spin 1s linear infinite;
+      margin: 20px auto;
+    }
+    
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    
+    h1 {
+      color: #333;
+      margin-bottom: 10px;
+      font-size: 28px;
+    }
+    
+    .status {
+      color: #666;
+      margin-bottom: 20px;
+      font-size: 14px;
+    }
+    
+    .user-info {
+      background: #f8f9fa;
+      border-radius: 8px;
+      padding: 20px;
+      margin: 20px 0;
+      text-align: left;
+    }
+    
+    .user-info h3 {
+      color: #333;
+      margin-bottom: 12px;
+      font-size: 16px;
+    }
+    
+    .user-info p {
+      color: #666;
+      margin: 8px 0;
+      font-size: 14px;
+      word-break: break-all;
+    }
+    
+    .debug-log {
+      margin-top: 24px;
+      padding: 16px;
+      background: #1e1e1e;
+      border-radius: 8px;
+      color: #d4d4d4;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      max-height: 300px;
+      overflow-y: auto;
+      text-align: left;
+    }
+    
+    .error {
+      background: #fee;
+      border: 2px solid #fcc;
+      border-radius: 8px;
+      padding: 20px;
+      color: #c33;
+      margin: 20px 0;
+    }
+    
+    .success {
+      background: #efe;
+      border: 2px solid #cfc;
+      border-radius: 8px;
+      padding: 20px;
+      color: #363;
+      margin: 20px 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="callback-container">
+    <h1>🎭 Benefizshow</h1>
+    <div class="spinner"></div>
+    <p class="status" id="status">Authentifizierung wird verarbeitet...</p>
+    
+    <div id="result"></div>
+    
+    <div class="debug-log" id="debug-log"></div>
+  </div>
+
+  <script>
+    // ====================================================================
+    // DEBUG-LOGGING
+    // ====================================================================
+    
+    function log(message, data = null) {
+      const timestamp = new Date().toLocaleTimeString();
+      const logElement = document.getElementById('debug-log');
+      const logLine = `[${timestamp}] ${message}${data ? '\n' + JSON.stringify(data, null, 2) : ''}`;
+      console.log(logLine);
+      
+      if (logElement) {
+        logElement.innerHTML += logLine + '\n\n';
+        logElement.scrollTop = logElement.scrollHeight;
+      }
+    }
+    
+    // ====================================================================
+    // TOKEN-VERARBEITUNG
+    // ====================================================================
+    
+    function handleCallback() {
+      log('🔍 URL analysieren...');
+      
+      // Token aus URL-Parameter extrahieren
+      const urlParams = new URLSearchParams(window.location.search);
+      const token = urlParams.get('token');
+      
+      log('📦 URL-Parameter:', Object.fromEntries(urlParams));
+      
+      if (!token) {
+        log('❌ Kein Token gefunden');
+        showError('Kein Authentifizierungs-Token gefunden. Bitte versuchen Sie es erneut.');
+        return;
+      }
+      
+      log('✅ Token gefunden:', token.substring(0, 20) + '...');
+      
+      // Token in localStorage speichern
+      localStorage.setItem('auth_token', token);
+      log('💾 Token in localStorage gespeichert');
+      
+      // Token dekodieren (JWT)
+      try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        log('🔓 Token-Payload dekodiert:', payload);
+        
+        showSuccess(payload);
+        
+        // Nach 2 Sekunden zur Admin-Konsole weiterleiten
+        setTimeout(() => {
+          log('🚀 Weiterleitung zur Admin-Konsole...');
+          window.location.href = '/admin/dashboard.html';
+        }, 2000);
+        
+      } catch (error) {
+        log('❌ Fehler beim Dekodieren des Tokens:', error);
+        showError('Fehler beim Verarbeiten des Tokens: ' + error.message);
+      }
+    }
+    
+    // ====================================================================
+    // UI-FUNKTIONEN
+    // ====================================================================
+    
+    function showSuccess(payload) {
+      const statusElement = document.getElementById('status');
+      const resultElement = document.getElementById('result');
+      
+      statusElement.textContent = 'Login erfolgreich!';
+      
+      resultElement.innerHTML = `
+        <div class="success">
+          <h3>✅ Anmeldung erfolgreich!</h3>
+          <p>Sie werden automatisch weitergeleitet...</p>
+        </div>
+        <div class="user-info">
+          <h3>👤 Benutzerinformationen</h3>
+          <p><strong>E-Mail:</strong> ${payload.email || 'N/A'}</p>
+          <p><strong>User ID:</strong> ${payload.sub || 'N/A'}</p>
+          <p><strong>Rollen:</strong> ${payload.roles ? payload.roles.join(', ') : 'N/A'}</p>
+          <p><strong>Gültig bis:</strong> ${payload.exp ? new Date(payload.exp * 1000).toLocaleString() : 'N/A'}</p>
+        </div>
+      `;
+      
+      // Spinner ausblenden
+      document.querySelector('.spinner').style.display = 'none';
+    }
+    
+    function showError(message) {
+      const statusElement = document.getElementById('status');
+      const resultElement = document.getElementById('result');
+      
+      statusElement.textContent = 'Fehler bei der Anmeldung';
+      
+      resultElement.innerHTML = `
+        <div class="error">
+          <h3>❌ Fehler</h3>
+          <p>${message}</p>
+          <p style="margin-top: 12px;">
+            <a href="/admin/login.html" style="color: #c33; text-decoration: underline;">
+              Zurück zur Anmeldung
+            </a>
+          </p>
+        </div>
+      `;
+      
+      // Spinner ausblenden
+      document.querySelector('.spinner').style.display = 'none';
+    }
+    
+    // ====================================================================
+    // INITIALISIERUNG
+    // ====================================================================
+    
+    log('🔄 Callback-Handler gestartet');
+    handleCallback();
+  </script>
+</body>
+</html>
+
