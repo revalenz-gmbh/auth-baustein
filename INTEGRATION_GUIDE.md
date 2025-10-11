@@ -593,6 +593,255 @@ revalenz-platform/
 3. Speichern
 4. Neu versuchen
 
+### Problem: Callback landet auf falscher Domain trotz TRUSTED_DOMAINS
+
+**Symptome:**
+- Callback landet auf `revalenz.de` statt auf Ihrer Domain
+- URL enthält seltsame Zeichen wie `https://revalenz.de,%20https//www.revalenz.de`
+- Fehlende oder fehlerhafte `returnUrl` im State
+
+**Häufige Ursachen & Lösungen:**
+
+#### 1. **Veraltete AUTH_BASE URL**
+```javascript
+// ❌ FALSCH - Alte Vercel-URL
+const AUTH_BASE = 'https://auth-baustein.vercel.app/api';
+
+// ✅ RICHTIG - Production URL
+const AUTH_BASE = 'https://accounts.revalenz.de/api';
+```
+
+**Wo prüfen:**
+- In Ihrer HTML/JS-Datei (meist am Anfang)
+- In Ihrer Config-Datei (`config.js`, `constants.ts`, etc.)
+
+#### 2. **returnUrl nicht vollständig**
+```javascript
+// ❌ FALSCH - Relative URL
+const returnUrl = '/auth/callback';
+
+// ❌ FALSCH - Ohne Protokoll
+const returnUrl = 'benefizshow.de/admin.html';
+
+// ✅ RICHTIG - Vollständige HTTPS-URL
+const returnUrl = `${window.location.origin}${window.location.pathname}`;
+// Ergibt: "https://benefizshow.de/admin.html"
+```
+
+**Best Practice:**
+```javascript
+function handleProviderLogin(provider) {
+  // Vollständige URL mit origin + pathname
+  const returnUrl = `${window.location.origin}${window.location.pathname}`;
+  
+  // Client-seitige Validierung
+  if (!returnUrl.startsWith('https://') && !returnUrl.startsWith('http://localhost')) {
+    console.error('❌ Invalid returnUrl:', returnUrl);
+    alert('Fehler: returnUrl muss mit https:// beginnen!');
+    return;
+  }
+  
+  const stateObj = {
+    returnUrl: returnUrl,
+    origin: window.location.origin,
+    mode: 'redirect',
+    privacy_consent: {
+      accepted: true,
+      timestamp: new Date().toISOString()
+    }
+  };
+  
+  // Base64url encoding
+  const stateB64 = btoa(unescape(encodeURIComponent(JSON.stringify(stateObj))))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+  
+  window.location.href = `${AUTH_BASE}/api/auth/oauth/${provider}?state=${stateB64}`;
+}
+```
+
+#### 3. **Debug-Logging aktivieren**
+
+**Im Frontend (Browser Console):**
+```javascript
+console.log('🔐 Login Debug:', {
+  provider: provider,
+  returnUrl: returnUrl,
+  origin: window.location.origin,
+  stateObj: stateObj,
+  authBase: AUTH_BASE
+});
+console.log('🔐 State Base64url:', stateB64);
+console.log('🔐 Redirecting to:', authUrl);
+```
+
+**Im Backend (Vercel Logs):**
+```bash
+# Echtzeit-Logs anzeigen
+vercel logs --follow --project auth-baustein
+
+# Oder im Dashboard:
+# https://vercel.com/your-org/auth-baustein → Deployments → Latest → Logs
+```
+
+**Suchen Sie nach:**
+- `📦 Raw state parameter:` - Der Base64url-String
+- `📦 Decoded state:` - Der dekodierte JSON-String
+- `📦 Parsed state object:` - Das State-Objekt als JSON
+- `🔍 Redirect Debug - Raw State:` - State vor Normalisierung
+- `🔍 Redirect Debug - After Normalization:` - State nach Normalisierung
+- `✅ Validated returnUrl:` - Erfolgreiche Validierung
+- `⚠️ Using fallback URL:` - Fehler! Fallback wurde verwendet
+
+**Erfolgreiche Logs sehen so aus:**
+```
+📦 Raw state parameter: eyJyZXR1cm5VcmwiOiJodHRwczovL2JlbmVmaXpzaG93LmRlL2FkbWluLmh0bWwiLC...
+📦 Decoded state: {"returnUrl":"https://benefizshow.de/admin.html",...}
+📦 Parsed state object: {
+  "returnUrl": "https://benefizshow.de/admin.html",
+  "origin": "https://benefizshow.de",
+  ...
+}
+🔍 Redirect Debug - Raw State: {
+  "rawReturnUrl": "https://benefizshow.de/admin.html",
+  ...
+}
+🔍 Redirect Debug - After Normalization: {
+  "normalizedReturnUrl": "https://benefizshow.de/admin.html",
+  ...
+}
+✅ Validated returnUrl: https://benefizshow.de/admin.html
+```
+
+#### 4. **Testing-Workflow**
+
+**Schritt 1:** Browser Console öffnen (F12)
+```
+→ Console-Tab öffnen
+→ Alle Logs löschen (clear)
+```
+
+**Schritt 2:** Login-Button klicken
+```
+→ Prüfen: Werden die Debug-Logs angezeigt?
+→ Prüfen: Ist returnUrl vollständig? (mit https://)
+→ Prüfen: Ist AUTH_BASE korrekt?
+```
+
+**Schritt 3:** Nach OAuth-Login
+```
+→ Prüfen: Auf welcher Domain sind Sie gelandet?
+→ Erwartung: https://ihre-domain.de/ihre-seite?token=...
+→ NICHT: https://revalenz.de/...
+```
+
+**Schritt 4:** Vercel-Logs prüfen
+```
+→ Vercel Dashboard öffnen
+→ Auth-Baustein → Deployments → Latest → Logs
+→ Suchen nach "📦" und "🔍"
+→ Prüfen: Wurde returnUrl korrekt dekodiert?
+→ Prüfen: Steht "✅ Validated returnUrl" in den Logs?
+```
+
+#### 5. **Komplettes Beispiel: Vanilla HTML/JS Integration**
+
+```html
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <title>Mein Admin-Panel - Login</title>
+</head>
+<body>
+  <h1>Admin Login</h1>
+  <button onclick="handleProviderLogin('google')">🔐 Mit Google anmelden</button>
+  <button onclick="handleProviderLogin('github')">🔐 Mit GitHub anmelden</button>
+  <button onclick="handleProviderLogin('microsoft')">🔐 Mit Microsoft anmelden</button>
+
+  <script>
+    // ✅ WICHTIG: Production Auth-Baustein URL verwenden!
+    const AUTH_BASE = 'https://accounts.revalenz.de/api';
+
+    function handleProviderLogin(provider) {
+      // Vollständige returnUrl erstellen
+      const returnUrl = `${window.location.origin}${window.location.pathname}`;
+      
+      // Debug-Logging
+      console.log('🔐 Login Debug:', {
+        provider: provider,
+        returnUrl: returnUrl,
+        origin: window.location.origin,
+        authBase: AUTH_BASE
+      });
+      
+      // Validierung
+      if (!returnUrl.startsWith('https://') && !returnUrl.startsWith('http://localhost')) {
+        console.error('❌ Invalid returnUrl:', returnUrl);
+        alert('Fehler: returnUrl muss mit https:// beginnen!');
+        return;
+      }
+      
+      // State-Objekt
+      const stateObj = {
+        returnUrl: returnUrl,
+        origin: window.location.origin,
+        mode: 'redirect',
+        privacy_consent: {
+          accepted: true,
+          timestamp: new Date().toISOString()
+        }
+      };
+      
+      // Base64url encoding
+      const stateB64 = btoa(unescape(encodeURIComponent(JSON.stringify(stateObj))))
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
+      
+      const authUrl = `${AUTH_BASE}/auth/oauth/${provider}?state=${stateB64}`;
+      console.log('🔐 State Base64url:', stateB64);
+      console.log('🔐 Redirecting to:', authUrl);
+      
+      // Redirect
+      window.location.href = authUrl;
+    }
+
+    // Token aus URL extrahieren (nach Callback)
+    window.addEventListener('DOMContentLoaded', () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const token = urlParams.get('token');
+      
+      if (token) {
+        console.log('✅ Token empfangen:', token.substring(0, 20) + '...');
+        
+        // Token speichern
+        localStorage.setItem('admin_jwt', token);
+        
+        // URL bereinigen (Token aus Adresszeile entfernen)
+        history.replaceState(null, document.title, window.location.pathname);
+        
+        // UI aktualisieren (z.B. Admin-Panel anzeigen)
+        alert('Login erfolgreich!');
+        window.location.reload();
+      }
+    });
+  </script>
+</body>
+</html>
+```
+
+#### 6. **Checkliste bei Redirect-Problemen**
+
+- [ ] **AUTH_BASE** ist `https://accounts.revalenz.de/api` (nicht die alte Vercel-URL!)
+- [ ] **returnUrl** ist vollständige HTTPS-URL (nicht relativ!)
+- [ ] **Ihre Domain** ist in `TRUSTED_DOMAINS` eingetragen
+- [ ] **Browser Console** zeigt Debug-Logs an
+- [ ] **Vercel Logs** zeigen "✅ Validated returnUrl"
+- [ ] **Browser Cache** gelöscht (Strg+F5)
+- [ ] **Neuestes Deployment** ist aktiv auf Vercel
+
 ---
 
 ## 📚 Weitere Ressourcen
