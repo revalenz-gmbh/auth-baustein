@@ -3,7 +3,6 @@ import helmet from 'helmet';
 import cors from 'cors';
 import authRoutes from './routes/auth.js';
 import workshopRoutes from './routes/workshops.js';
-import webauthnRoutes from './routes/webauthn.js';
 
 export function buildApp() {
   const app = express();
@@ -36,7 +35,6 @@ export function buildApp() {
   app.get('/', (req, res) => res.json({ name: 'auth-baustein', status: 'ok' }));
   app.get('/health', (req, res) => res.json({ status: 'ok', service: 'auth-baustein' }));
   app.use('/auth', authRoutes);
-  app.use('/auth/webauthn', webauthnRoutes); // WebAuthn/Biometric Auth
   app.use('/workshops', workshopRoutes);
 
   // 404
