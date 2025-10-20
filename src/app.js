@@ -33,6 +33,7 @@ export function buildApp() {
   app.use(express.json());
 
   app.get('/', (req, res) => res.json({ name: 'auth-baustein', status: 'ok' }));
+  app.get('/health', (req, res) => res.json({ status: 'ok', service: 'auth-baustein' }));
   app.use('/auth', authRoutes);
   app.use('/workshops', workshopRoutes);
 
