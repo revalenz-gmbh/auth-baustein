@@ -31,7 +31,7 @@ function signToken(user, tenants) {
       tenants: tenantIds 
     },
     process.env.AUTH_JWT_SECRET,
-    { expiresIn: '1h' }
+    { expiresIn: process.env.JWT_EXPIRES_IN || '24h' } // Von 1h auf 24h erhöht für bessere UX
   );
 }
 
