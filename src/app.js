@@ -12,17 +12,19 @@ export function buildApp() {
   const allowedOrigins = Array.from(new Set([...defaults, ...envList]));
   const corsOptions = {
     origin: true, // permissiv; Absicherung erfolgt über Auth/Scopes
-    credentials: false,
+    credentials: true, // wichtig für httpOnly Refresh-Cookies
     allowedHeaders: ['Content-Type', 'Authorization'],
     methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS']
   };
   // Manuelles CORS-Header-Setzen (failsafe) + cors() Middleware
+  // Gibt Origin dynamisch zurück → funktioniert mit www.revalenz.de nach 301-Redirect
   app.use((req, res, next) => {
     const origin = req.headers.origin || '*';
     res.setHeader('Access-Control-Allow-Origin', origin === '' ? '*' : origin);
     res.setHeader('Vary', 'Origin');
     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
     if (req.method === 'OPTIONS') return res.status(204).end();
     next();
   });

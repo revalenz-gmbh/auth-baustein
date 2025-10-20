@@ -35,6 +35,40 @@ function signToken(user, tenants) {
   );
 }
 
+function signRefreshToken(user) {
+  return jwt.sign(
+    { sub: String(user.id), email: user.email },
+    process.env.AUTH_REFRESH_SECRET || process.env.AUTH_JWT_SECRET,
+    { expiresIn: process.env.AUTH_REFRESH_EXPIRES || '30d' }
+  );
+}
+
+function setRefreshCookie(res, refreshToken) {
+  const isProd = process.env.NODE_ENV === 'production';
+  const domain = process.env.AUTH_COOKIE_DOMAIN || '.revalenz.de';
+  res.cookie('refresh_token', refreshToken, {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: 'lax',
+    domain,
+    path: '/auth',
+    maxAge: 1000 * 60 * 60 * 24 * 30
+  });
+}
+
+function clearRefreshCookie(res) {
+  const isProd = process.env.NODE_ENV === 'production';
+  const domain = process.env.AUTH_COOKIE_DOMAIN || '.revalenz.de';
+  res.cookie('refresh_token', '', {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: 'lax',
+    domain,
+    path: '/auth',
+    maxAge: 0
+  });
+}
+
 // ============================================================================
 // PUBLIC ENDPOINTS
 // ============================================================================
@@ -62,6 +96,41 @@ router.get('/me', async (req, res) => {
   }
 });
 
+// Refresh access token using httpOnly cookie
+router.post('/refresh', async (req, res) => {
+  try {
+    const cookieHeader = req.headers.cookie || '';
+    const cookies = Object.fromEntries(cookieHeader.split(';').map(c => c.trim().split('=')));
+    const refresh = cookies['refresh_token'];
+    if (!refresh) {
+      return res.status(401).json({ success: false, message: 'No refresh token' });
+    }
+
+    let payload;
+    try {
+      payload = jwt.verify(refresh, process.env.AUTH_REFRESH_SECRET || process.env.AUTH_JWT_SECRET);
+    } catch (e) {
+      return res.status(401).json({ success: false, message: 'Invalid refresh token' });
+    }
+
+    const r = await query('SELECT id, email, name, role FROM users WHERE id = $1', [payload.sub]);
+    const user = r.rows[0];
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'User not found' });
+    }
+
+    const tenants = await fetchTenantsForUser(user.id);
+    const token = signToken(user, tenants);
+    const newRefresh = signRefreshToken(user);
+    setRefreshCookie(res, newRefresh);
+
+    return res.json({ success: true, token });
+  } catch (e) {
+    console.error('Refresh error:', e);
+    return res.status(500).json({ success: false, message: 'Internal error' });
+  }
+});
+
 // Login with API Key (for automated systems)
 router.post('/login', async (req, res) => {
   try {
@@ -83,13 +152,15 @@ router.post('/login', async (req, res) => {
 
     const tenants = await fetchTenantsForUser(user.id);
     const token = signToken(user, tenants);
-
+    const refresh = signRefreshToken(user);
+    setRefreshCookie(res, refresh);
+    
     return res.json({ 
       success: true, 
       token, 
       user: { 
-        id: user.id, 
-        email: user.email, 
+        id: user.id,
+        email: user.email,
         name: user.name, 
         role: user.role 
       } 
@@ -182,6 +253,8 @@ router.get('/oauth/google/callback', async (req, res) => {
     const dbUser = ins.rows[0];
     const tenants = await fetchTenantsForUser(dbUser.id);
     const token = signToken(dbUser, tenants);
+    const refresh = signRefreshToken(dbUser);
+    setRefreshCookie(res, refresh);
 
     // Redirect to frontend with token (validated for multi-tenant security)
     const redirectUrl = getValidatedRedirectUrl(state);
@@ -283,7 +356,7 @@ router.get('/oauth/github/callback', async (req, res) => {
       const primaryEmail = emails.find(e => e.primary);
       email = primaryEmail ? primaryEmail.email : null;
     }
-
+    
     if (!email) {
       return res.status(400).json({ success: false, message: 'No email available from GitHub' });
     }
@@ -301,6 +374,8 @@ router.get('/oauth/github/callback', async (req, res) => {
     const dbUser = ins.rows[0];
     const tenants = await fetchTenantsForUser(dbUser.id);
     const token = signToken(dbUser, tenants);
+    const refresh = signRefreshToken(dbUser);
+    setRefreshCookie(res, refresh);
 
     // Redirect to frontend with token (validated for multi-tenant security)
     const redirectUrl = getValidatedRedirectUrl(state);
@@ -394,11 +469,13 @@ router.get('/oauth/microsoft/callback', async (req, res) => {
     const dbUser = ins.rows[0];
     const tenants = await fetchTenantsForUser(dbUser.id);
     const token = signToken(dbUser, tenants);
+    const refresh = signRefreshToken(dbUser);
+    setRefreshCookie(res, refresh);
 
     // Redirect to frontend with token (validated for multi-tenant security)
     const redirectUrl = getValidatedRedirectUrl(state);
     return res.redirect(`${redirectUrl}?token=${token}`);
-
+    
   } catch (error) {
     console.error('Microsoft OAuth error:', error);
     return res.status(500).json({ success: false, message: 'oauth failed' });
@@ -414,27 +491,27 @@ router.get('/user-status', async (req, res) => {
     const { email } = req.query;
     
     if (!email) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'E-Mail-Adresse erforderlich' 
+      return res.status(400).json({
+        success: false,
+        message: 'E-Mail-Adresse erforderlich'
       });
     }
-
+    
     const result = await query(
       'SELECT id, email, status, email_verified, provider FROM users WHERE email = $1',
       [email]
     );
-
+    
     if (result.rows.length === 0) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Benutzer nicht gefunden' 
+      return res.status(404).json({
+        success: false,
+        message: 'Benutzer nicht gefunden'
       });
     }
-
+    
     const user = result.rows[0];
-    return res.json({ 
-      success: true, 
+    return res.json({
+      success: true,
       data: {
         email: user.email,
         status: user.status,
@@ -442,11 +519,11 @@ router.get('/user-status', async (req, res) => {
         provider: user.provider
       }
     });
-
+    
   } catch (error) {
     console.error('User status error:', error);
     return res.status(500).json({ 
-      success: false, 
+      success: false,
       message: 'Fehler beim Abrufen des Benutzerstatus' 
     });
   }
