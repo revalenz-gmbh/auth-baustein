@@ -183,6 +183,8 @@ router.get('/oauth/google', (req, res) => {
     redirect_uri: `${backendUrl}/api/auth/oauth/google/callback`,
     response_type: 'code',
     scope: 'openid email profile',
+    prompt: 'select_account',  // UX-Verbesserung: Account-Auswahl, kein Consent bei wiederholtem Login
+    access_type: 'online',      // Kein Refresh Token = weniger Angriffsfläche
     ...(state && { state })
   });
   res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params}`);
@@ -399,6 +401,7 @@ router.get('/oauth/microsoft', (req, res) => {
     redirect_uri: `${backendUrl}/api/auth/oauth/microsoft/callback`,
     response_type: 'code',
     scope: 'openid email profile',
+    prompt: 'select_account',  // UX-Verbesserung: Account-Auswahl, kein Consent bei wiederholtem Login
     ...(state && { state })
   });
   res.redirect(`https://login.microsoftonline.com/common/oauth2/v2.0/authorize?${params}`);
