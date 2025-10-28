@@ -22,8 +22,12 @@ Dieser Baustein stellt nur die API-Endpunkte zur Verfügung - die Admin-Oberflä
 - ✅ **E-Mail/Passwort** Login
 - ✅ **API-Key** Login
 - ✅ **Google OAuth** Integration
+- ✅ **GitHub OAuth** Integration
+- ✅ **Microsoft OAuth** Integration
 - ✅ **JWT** Token-basierte Sessions (HS256)
+- ✅ **Refresh Tokens** mit httpOnly Cookies
 - ✅ **Multi-Tenant** Support
+- ✅ **Multi-Domain OAuth** Support ✨ NEU
 
 ### **Benutzer-Management:**
 - ✅ **Admin-Rollen** mit Tenant-Zuordnung
@@ -45,6 +49,35 @@ Dieser Baustein stellt nur die API-Endpunkte zur Verfügung - die Admin-Oberflä
 
 ## 🎯 **Frontend-Integration**
 
+### **Multi-Domain OAuth Support** ✨ NEU
+
+Der Auth-Baustein unterstützt mehrere Domains und redirected nach erfolgreicher Authentifizierung zur korrekten Domain zurück.
+
+**Unterstützte Domains:**
+- `https://revalenz.de`
+- `https://www.revalenz.de`
+- `https://benefizshow.de`
+- `https://www.benefizshow.de`
+- `https://ecotrainer.revalenz.de`
+
+**Integration:**
+
+```javascript
+// Option 1: Mit redirect Query-Parameter (empfohlen für externe Apps)
+window.location.href = `https://accounts.revalenz.de/api/auth/oauth/google?redirect=${encodeURIComponent('https://ecotrainer.revalenz.de/auth/callback')}`;
+
+// Option 2: Mit State-Objekt (empfohlen für Revalenz-Frontends)
+const stateObj = {
+  returnUrl: `${window.location.origin}/auth/callback`,
+  privacy_consent: { accepted: true }
+};
+const stateB64 = btoa(unescape(encodeURIComponent(JSON.stringify(stateObj))))
+  .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+window.location.href = `https://accounts.revalenz.de/api/auth/oauth/google?state=${stateB64}`;
+```
+
+📖 **Vollständige Dokumentation**: Siehe [MULTI_DOMAIN_OAUTH.md](./MULTI_DOMAIN_OAUTH.md)
+
 ### **Admin-Interface in Frontend implementieren:**
 
 Dieser Auth-Baustein stellt nur die API-Endpunkte zur Verfügung. Für die Admin-Verwaltung implementieren Sie bitte ein Frontend-Interface in Ihrem Hauptprojekt.
@@ -62,8 +95,16 @@ Dieser Auth-Baustein stellt nur die API-Endpunkte zur Verfügung. Für die Admin
 
 ### **Authentifizierung:**
 - `GET /api/auth/me` - JWT validieren und Benutzerinfo abrufen
-- `GET /api/auth/oauth/google` - Google OAuth Login starten
-- `GET /api/auth/oauth/google/callback` - OAuth Callback (automatisch)
+- `POST /api/auth/login` - API-Key Login
+- `POST /api/auth/refresh` - Access Token mit Refresh Token erneuern
+
+### **OAuth (Google, GitHub, Microsoft):**
+- `GET /api/auth/oauth/google?redirect=<url>` - Google OAuth starten
+- `GET /api/auth/oauth/google/callback` - Google OAuth Callback
+- `GET /api/auth/oauth/github?redirect=<url>` - GitHub OAuth starten
+- `GET /api/auth/oauth/github/callback` - GitHub OAuth Callback
+- `GET /api/auth/oauth/microsoft?redirect=<url>` - Microsoft OAuth starten
+- `GET /api/auth/oauth/microsoft/callback` - Microsoft OAuth Callback
 
 ### **Workshop-Management:**
 - `GET /api/workshops/my-registrations` - Eigene Anmeldungen abrufen

@@ -176,7 +176,46 @@ router.post('/login', async (req, res) => {
 // ============================================================================
 
 router.get('/oauth/google', (req, res) => {
-  const { state } = req.query;
+  const { state, redirect } = req.query;
+  
+  // Wenn ein redirect Parameter übergeben wurde, füge ihn zum State hinzu
+  let finalState = state;
+  if (redirect && !state) {
+    // Neuer State mit redirect Parameter
+    const stateObj = {
+      redirect: redirect,
+      timestamp: Date.now(),
+      nonce: Math.random().toString(36).substring(7)
+    };
+    finalState = Buffer.from(JSON.stringify(stateObj))
+      .toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+  } else if (redirect && state) {
+    // State existiert bereits (z.B. vom Frontend mit returnUrl), erweitere ihn um redirect
+    try {
+      const base64 = state.replace(/-/g, '+').replace(/_/g, '/');
+      const padded = base64 + '='.repeat((4 - base64.length % 4) % 4);
+      const decoded = Buffer.from(padded, 'base64').toString('utf8');
+      const stateObj = JSON.parse(decoded);
+      stateObj.redirect = redirect;
+      finalState = Buffer.from(JSON.stringify(stateObj))
+        .toString('base64')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
+    } catch (err) {
+      console.error('⚠️ Could not parse existing state, using redirect only:', err.message);
+      const stateObj = { redirect: redirect };
+      finalState = Buffer.from(JSON.stringify(stateObj))
+        .toString('base64')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
+    }
+  }
+  
   const backendUrl = process.env.BACKEND_URL || 'https://accounts.revalenz.de';
   const params = new URLSearchParams({
     client_id: process.env.GOOGLE_CLIENT_ID,
@@ -185,7 +224,7 @@ router.get('/oauth/google', (req, res) => {
     scope: 'openid email profile',
     prompt: 'select_account',  // UX-Verbesserung: Account-Auswahl, kein Consent bei wiederholtem Login
     access_type: 'online',      // Kein Refresh Token = weniger Angriffsfläche
-    ...(state && { state })
+    ...(finalState && { state: finalState })
   });
   res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params}`);
 });
@@ -273,13 +312,52 @@ router.get('/oauth/google/callback', async (req, res) => {
 // ============================================================================
 
 router.get('/oauth/github', (req, res) => {
-  const { state } = req.query;
+  const { state, redirect } = req.query;
+  
+  // Wenn ein redirect Parameter übergeben wurde, füge ihn zum State hinzu
+  let finalState = state;
+  if (redirect && !state) {
+    // Neuer State mit redirect Parameter
+    const stateObj = {
+      redirect: redirect,
+      timestamp: Date.now(),
+      nonce: Math.random().toString(36).substring(7)
+    };
+    finalState = Buffer.from(JSON.stringify(stateObj))
+      .toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+  } else if (redirect && state) {
+    // State existiert bereits (z.B. vom Frontend mit returnUrl), erweitere ihn um redirect
+    try {
+      const base64 = state.replace(/-/g, '+').replace(/_/g, '/');
+      const padded = base64 + '='.repeat((4 - base64.length % 4) % 4);
+      const decoded = Buffer.from(padded, 'base64').toString('utf8');
+      const stateObj = JSON.parse(decoded);
+      stateObj.redirect = redirect;
+      finalState = Buffer.from(JSON.stringify(stateObj))
+        .toString('base64')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
+    } catch (err) {
+      console.error('⚠️ Could not parse existing state, using redirect only:', err.message);
+      const stateObj = { redirect: redirect };
+      finalState = Buffer.from(JSON.stringify(stateObj))
+        .toString('base64')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
+    }
+  }
+  
   const backendUrl = process.env.BACKEND_URL || 'https://accounts.revalenz.de';
   const params = new URLSearchParams({
     client_id: process.env.GITHUB_CLIENT_ID,
     redirect_uri: `${backendUrl}/api/auth/oauth/github/callback`,
     scope: 'user:email',
-    ...(state && { state })
+    ...(finalState && { state: finalState })
   });
   res.redirect(`https://github.com/login/oauth/authorize?${params}`);
 });
@@ -394,7 +472,46 @@ router.get('/oauth/github/callback', async (req, res) => {
 // ============================================================================
 
 router.get('/oauth/microsoft', (req, res) => {
-  const { state } = req.query;
+  const { state, redirect } = req.query;
+  
+  // Wenn ein redirect Parameter übergeben wurde, füge ihn zum State hinzu
+  let finalState = state;
+  if (redirect && !state) {
+    // Neuer State mit redirect Parameter
+    const stateObj = {
+      redirect: redirect,
+      timestamp: Date.now(),
+      nonce: Math.random().toString(36).substring(7)
+    };
+    finalState = Buffer.from(JSON.stringify(stateObj))
+      .toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+  } else if (redirect && state) {
+    // State existiert bereits (z.B. vom Frontend mit returnUrl), erweitere ihn um redirect
+    try {
+      const base64 = state.replace(/-/g, '+').replace(/_/g, '/');
+      const padded = base64 + '='.repeat((4 - base64.length % 4) % 4);
+      const decoded = Buffer.from(padded, 'base64').toString('utf8');
+      const stateObj = JSON.parse(decoded);
+      stateObj.redirect = redirect;
+      finalState = Buffer.from(JSON.stringify(stateObj))
+        .toString('base64')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
+    } catch (err) {
+      console.error('⚠️ Could not parse existing state, using redirect only:', err.message);
+      const stateObj = { redirect: redirect };
+      finalState = Buffer.from(JSON.stringify(stateObj))
+        .toString('base64')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
+    }
+  }
+  
   const backendUrl = process.env.BACKEND_URL || 'https://accounts.revalenz.de';
   const params = new URLSearchParams({
     client_id: process.env.MICROSOFT_CLIENT_ID,
@@ -402,7 +519,7 @@ router.get('/oauth/microsoft', (req, res) => {
     response_type: 'code',
     scope: 'openid email profile',
     prompt: 'select_account',  // UX-Verbesserung: Account-Auswahl, kein Consent bei wiederholtem Login
-    ...(state && { state })
+    ...(finalState && { state: finalState })
   });
   res.redirect(`https://login.microsoftonline.com/common/oauth2/v2.0/authorize?${params}`);
 });
