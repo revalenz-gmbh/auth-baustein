@@ -1,5 +1,25 @@
 # Changelog - Multi-Domain OAuth Support
 
+## Version 2.0.1 - Bugfix OAuth State (29. Oktober 2025)
+
+### 🐛 Bugfixes
+
+#### OAuth State Verarbeitung
+**Problem:** Nach der Implementierung des Multi-Domain OAuth Supports funktionierte die Authentifizierung für bestehende Domains nicht mehr. User wurden nach OAuth zurück zu `/auth/login` geleitet.
+
+**Lösung:** State-Verarbeitung vereinfacht:
+- ✅ Wenn Frontend `state` sendet (revalenz.de, benefizshow.de), wird dieser **unverändert** weitergeleitet
+- ✅ Wenn nur `redirect` Parameter kommt (ecotrainer.revalenz.de), wird neuer State erstellt
+- ✅ Kein State-Parsing mehr bei bestehenden Domains
+- ✅ 100% Rückwärtskompatibilität garantiert
+
+**Geänderte Dateien:**
+- `src/routes/auth.js` (Google, GitHub, Microsoft OAuth-Routen)
+
+**Dokumentation:** Siehe `BUGFIX_OAUTH_STATE.md`
+
+---
+
 ## Version 2.0.0 - Multi-Domain OAuth Support (28. Oktober 2025)
 
 ### ✨ Neue Features

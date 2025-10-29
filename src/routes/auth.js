@@ -178,10 +178,14 @@ router.post('/login', async (req, res) => {
 router.get('/oauth/google', (req, res) => {
   const { state, redirect } = req.query;
   
-  // Wenn ein redirect Parameter übergeben wurde, füge ihn zum State hinzu
-  let finalState = state;
+  console.log('🚀 OAuth Google Start:', { hasState: !!state, hasRedirect: !!redirect });
+  
+  // Wenn ein redirect Parameter übergeben wurde UND kein state, erstelle neuen State
+  let finalState = state; // Standardmäßig den übergebenen State verwenden (für revalenz.de, benefizshow.de)
+  
   if (redirect && !state) {
-    // Neuer State mit redirect Parameter
+    // Nur redirect Parameter, kein State vom Frontend (z.B. ecotrainer.revalenz.de)
+    console.log('🔧 Creating new state with redirect:', redirect);
     const stateObj = {
       redirect: redirect,
       timestamp: Date.now(),
@@ -192,29 +196,9 @@ router.get('/oauth/google', (req, res) => {
       .replace(/\+/g, '-')
       .replace(/\//g, '_')
       .replace(/=+$/, '');
-  } else if (redirect && state) {
-    // State existiert bereits (z.B. vom Frontend mit returnUrl), erweitere ihn um redirect
-    try {
-      const base64 = state.replace(/-/g, '+').replace(/_/g, '/');
-      const padded = base64 + '='.repeat((4 - base64.length % 4) % 4);
-      const decoded = Buffer.from(padded, 'base64').toString('utf8');
-      const stateObj = JSON.parse(decoded);
-      stateObj.redirect = redirect;
-      finalState = Buffer.from(JSON.stringify(stateObj))
-        .toString('base64')
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_')
-        .replace(/=+$/, '');
-    } catch (err) {
-      console.error('⚠️ Could not parse existing state, using redirect only:', err.message);
-      const stateObj = { redirect: redirect };
-      finalState = Buffer.from(JSON.stringify(stateObj))
-        .toString('base64')
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_')
-        .replace(/=+$/, '');
-    }
   }
+  // Wenn beide existieren (redirect UND state), ignoriere redirect und nutze nur state
+  // Das verhindert Konflikte mit der bestehenden Frontend-Implementierung
   
   const backendUrl = process.env.BACKEND_URL || 'https://accounts.revalenz.de';
   const params = new URLSearchParams({
@@ -226,6 +210,9 @@ router.get('/oauth/google', (req, res) => {
     access_type: 'online',      // Kein Refresh Token = weniger Angriffsfläche
     ...(finalState && { state: finalState })
   });
+  
+  console.log('🔧 Final state being sent to Google:', finalState ? 'present' : 'missing');
+  
   res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params}`);
 });
 
@@ -314,10 +301,14 @@ router.get('/oauth/google/callback', async (req, res) => {
 router.get('/oauth/github', (req, res) => {
   const { state, redirect } = req.query;
   
-  // Wenn ein redirect Parameter übergeben wurde, füge ihn zum State hinzu
-  let finalState = state;
+  console.log('🚀 OAuth GitHub Start:', { hasState: !!state, hasRedirect: !!redirect });
+  
+  // Wenn ein redirect Parameter übergeben wurde UND kein state, erstelle neuen State
+  let finalState = state; // Standardmäßig den übergebenen State verwenden (für revalenz.de, benefizshow.de)
+  
   if (redirect && !state) {
-    // Neuer State mit redirect Parameter
+    // Nur redirect Parameter, kein State vom Frontend (z.B. ecotrainer.revalenz.de)
+    console.log('🔧 Creating new state with redirect:', redirect);
     const stateObj = {
       redirect: redirect,
       timestamp: Date.now(),
@@ -328,29 +319,9 @@ router.get('/oauth/github', (req, res) => {
       .replace(/\+/g, '-')
       .replace(/\//g, '_')
       .replace(/=+$/, '');
-  } else if (redirect && state) {
-    // State existiert bereits (z.B. vom Frontend mit returnUrl), erweitere ihn um redirect
-    try {
-      const base64 = state.replace(/-/g, '+').replace(/_/g, '/');
-      const padded = base64 + '='.repeat((4 - base64.length % 4) % 4);
-      const decoded = Buffer.from(padded, 'base64').toString('utf8');
-      const stateObj = JSON.parse(decoded);
-      stateObj.redirect = redirect;
-      finalState = Buffer.from(JSON.stringify(stateObj))
-        .toString('base64')
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_')
-        .replace(/=+$/, '');
-    } catch (err) {
-      console.error('⚠️ Could not parse existing state, using redirect only:', err.message);
-      const stateObj = { redirect: redirect };
-      finalState = Buffer.from(JSON.stringify(stateObj))
-        .toString('base64')
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_')
-        .replace(/=+$/, '');
-    }
   }
+  // Wenn beide existieren (redirect UND state), ignoriere redirect und nutze nur state
+  // Das verhindert Konflikte mit der bestehenden Frontend-Implementierung
   
   const backendUrl = process.env.BACKEND_URL || 'https://accounts.revalenz.de';
   const params = new URLSearchParams({
@@ -359,6 +330,9 @@ router.get('/oauth/github', (req, res) => {
     scope: 'user:email',
     ...(finalState && { state: finalState })
   });
+  
+  console.log('🔧 Final state being sent to GitHub:', finalState ? 'present' : 'missing');
+  
   res.redirect(`https://github.com/login/oauth/authorize?${params}`);
 });
 
@@ -474,10 +448,14 @@ router.get('/oauth/github/callback', async (req, res) => {
 router.get('/oauth/microsoft', (req, res) => {
   const { state, redirect } = req.query;
   
-  // Wenn ein redirect Parameter übergeben wurde, füge ihn zum State hinzu
-  let finalState = state;
+  console.log('🚀 OAuth Microsoft Start:', { hasState: !!state, hasRedirect: !!redirect });
+  
+  // Wenn ein redirect Parameter übergeben wurde UND kein state, erstelle neuen State
+  let finalState = state; // Standardmäßig den übergebenen State verwenden (für revalenz.de, benefizshow.de)
+  
   if (redirect && !state) {
-    // Neuer State mit redirect Parameter
+    // Nur redirect Parameter, kein State vom Frontend (z.B. ecotrainer.revalenz.de)
+    console.log('🔧 Creating new state with redirect:', redirect);
     const stateObj = {
       redirect: redirect,
       timestamp: Date.now(),
@@ -488,29 +466,9 @@ router.get('/oauth/microsoft', (req, res) => {
       .replace(/\+/g, '-')
       .replace(/\//g, '_')
       .replace(/=+$/, '');
-  } else if (redirect && state) {
-    // State existiert bereits (z.B. vom Frontend mit returnUrl), erweitere ihn um redirect
-    try {
-      const base64 = state.replace(/-/g, '+').replace(/_/g, '/');
-      const padded = base64 + '='.repeat((4 - base64.length % 4) % 4);
-      const decoded = Buffer.from(padded, 'base64').toString('utf8');
-      const stateObj = JSON.parse(decoded);
-      stateObj.redirect = redirect;
-      finalState = Buffer.from(JSON.stringify(stateObj))
-        .toString('base64')
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_')
-        .replace(/=+$/, '');
-    } catch (err) {
-      console.error('⚠️ Could not parse existing state, using redirect only:', err.message);
-      const stateObj = { redirect: redirect };
-      finalState = Buffer.from(JSON.stringify(stateObj))
-        .toString('base64')
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_')
-        .replace(/=+$/, '');
-    }
   }
+  // Wenn beide existieren (redirect UND state), ignoriere redirect und nutze nur state
+  // Das verhindert Konflikte mit der bestehenden Frontend-Implementierung
   
   const backendUrl = process.env.BACKEND_URL || 'https://accounts.revalenz.de';
   const params = new URLSearchParams({
@@ -521,6 +479,9 @@ router.get('/oauth/microsoft', (req, res) => {
     prompt: 'select_account',  // UX-Verbesserung: Account-Auswahl, kein Consent bei wiederholtem Login
     ...(finalState && { state: finalState })
   });
+  
+  console.log('🔧 Final state being sent to Microsoft:', finalState ? 'present' : 'missing');
+  
   res.redirect(`https://login.microsoftonline.com/common/oauth2/v2.0/authorize?${params}`);
 });
 
