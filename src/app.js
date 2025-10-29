@@ -7,17 +7,9 @@ import workshopRoutes from './routes/workshops.js';
 export function buildApp() {
   const app = express();
   app.use(helmet({ contentSecurityPolicy: false }));
-  const defaults = [
-    'https://revalenz.de',
-    'https://www.revalenz.de',
-    'https://benefizshow.de',
-    'https://www.benefizshow.de',
-    'https://ecotrainer.revalenz.de'
-  ];
+  const defaults = ['https://benefizshow.de','https://www.benefizshow.de'];
   const envList = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
   const allowedOrigins = Array.from(new Set([...defaults, ...envList]));
-  
-  console.log('🔒 CORS - Allowed Origins:', allowedOrigins);
   
   const corsOptions = {
     origin: true, // permissiv; Absicherung erfolgt über Auth/Scopes

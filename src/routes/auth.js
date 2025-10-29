@@ -176,30 +176,7 @@ router.post('/login', async (req, res) => {
 // ============================================================================
 
 router.get('/oauth/google', (req, res) => {
-  const { state, redirect } = req.query;
-  
-  console.log('🚀 OAuth Google Start:', { hasState: !!state, hasRedirect: !!redirect });
-  
-  // Wenn ein redirect Parameter übergeben wurde UND kein state, erstelle neuen State
-  let finalState = state; // Standardmäßig den übergebenen State verwenden (für revalenz.de, benefizshow.de)
-  
-  if (redirect && !state) {
-    // Nur redirect Parameter, kein State vom Frontend (z.B. ecotrainer.revalenz.de)
-    console.log('🔧 Creating new state with redirect:', redirect);
-    const stateObj = {
-      redirect: redirect,
-      timestamp: Date.now(),
-      nonce: Math.random().toString(36).substring(7)
-    };
-    finalState = Buffer.from(JSON.stringify(stateObj))
-      .toString('base64')
-      .replace(/\+/g, '-')
-      .replace(/\//g, '_')
-      .replace(/=+$/, '');
-  }
-  // Wenn beide existieren (redirect UND state), ignoriere redirect und nutze nur state
-  // Das verhindert Konflikte mit der bestehenden Frontend-Implementierung
-  
+  const { state } = req.query;
   const backendUrl = process.env.BACKEND_URL || 'https://accounts.revalenz.de';
   const params = new URLSearchParams({
     client_id: process.env.GOOGLE_CLIENT_ID,
@@ -208,11 +185,8 @@ router.get('/oauth/google', (req, res) => {
     scope: 'openid email profile',
     prompt: 'select_account',  // UX-Verbesserung: Account-Auswahl, kein Consent bei wiederholtem Login
     access_type: 'online',      // Kein Refresh Token = weniger Angriffsfläche
-    ...(finalState && { state: finalState })
+    ...(state && { state })
   });
-  
-  console.log('🔧 Final state being sent to Google:', finalState ? 'present' : 'missing');
-  
   res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params}`);
 });
 
@@ -299,40 +273,14 @@ router.get('/oauth/google/callback', async (req, res) => {
 // ============================================================================
 
 router.get('/oauth/github', (req, res) => {
-  const { state, redirect } = req.query;
-  
-  console.log('🚀 OAuth GitHub Start:', { hasState: !!state, hasRedirect: !!redirect });
-  
-  // Wenn ein redirect Parameter übergeben wurde UND kein state, erstelle neuen State
-  let finalState = state; // Standardmäßig den übergebenen State verwenden (für revalenz.de, benefizshow.de)
-  
-  if (redirect && !state) {
-    // Nur redirect Parameter, kein State vom Frontend (z.B. ecotrainer.revalenz.de)
-    console.log('🔧 Creating new state with redirect:', redirect);
-    const stateObj = {
-      redirect: redirect,
-      timestamp: Date.now(),
-      nonce: Math.random().toString(36).substring(7)
-    };
-    finalState = Buffer.from(JSON.stringify(stateObj))
-      .toString('base64')
-      .replace(/\+/g, '-')
-      .replace(/\//g, '_')
-      .replace(/=+$/, '');
-  }
-  // Wenn beide existieren (redirect UND state), ignoriere redirect und nutze nur state
-  // Das verhindert Konflikte mit der bestehenden Frontend-Implementierung
-  
+  const { state } = req.query;
   const backendUrl = process.env.BACKEND_URL || 'https://accounts.revalenz.de';
   const params = new URLSearchParams({
     client_id: process.env.GITHUB_CLIENT_ID,
     redirect_uri: `${backendUrl}/api/auth/oauth/github/callback`,
     scope: 'user:email',
-    ...(finalState && { state: finalState })
+    ...(state && { state })
   });
-  
-  console.log('🔧 Final state being sent to GitHub:', finalState ? 'present' : 'missing');
-  
   res.redirect(`https://github.com/login/oauth/authorize?${params}`);
 });
 
@@ -446,30 +394,7 @@ router.get('/oauth/github/callback', async (req, res) => {
 // ============================================================================
 
 router.get('/oauth/microsoft', (req, res) => {
-  const { state, redirect } = req.query;
-  
-  console.log('🚀 OAuth Microsoft Start:', { hasState: !!state, hasRedirect: !!redirect });
-  
-  // Wenn ein redirect Parameter übergeben wurde UND kein state, erstelle neuen State
-  let finalState = state; // Standardmäßig den übergebenen State verwenden (für revalenz.de, benefizshow.de)
-  
-  if (redirect && !state) {
-    // Nur redirect Parameter, kein State vom Frontend (z.B. ecotrainer.revalenz.de)
-    console.log('🔧 Creating new state with redirect:', redirect);
-    const stateObj = {
-      redirect: redirect,
-      timestamp: Date.now(),
-      nonce: Math.random().toString(36).substring(7)
-    };
-    finalState = Buffer.from(JSON.stringify(stateObj))
-      .toString('base64')
-      .replace(/\+/g, '-')
-      .replace(/\//g, '_')
-      .replace(/=+$/, '');
-  }
-  // Wenn beide existieren (redirect UND state), ignoriere redirect und nutze nur state
-  // Das verhindert Konflikte mit der bestehenden Frontend-Implementierung
-  
+  const { state } = req.query;
   const backendUrl = process.env.BACKEND_URL || 'https://accounts.revalenz.de';
   const params = new URLSearchParams({
     client_id: process.env.MICROSOFT_CLIENT_ID,
@@ -477,11 +402,8 @@ router.get('/oauth/microsoft', (req, res) => {
     response_type: 'code',
     scope: 'openid email profile',
     prompt: 'select_account',  // UX-Verbesserung: Account-Auswahl, kein Consent bei wiederholtem Login
-    ...(finalState && { state: finalState })
+    ...(state && { state })
   });
-  
-  console.log('🔧 Final state being sent to Microsoft:', finalState ? 'present' : 'missing');
-  
   res.redirect(`https://login.microsoftonline.com/common/oauth2/v2.0/authorize?${params}`);
 });
 

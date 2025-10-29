@@ -5,7 +5,6 @@ const TRUSTED_DOMAINS = [
   'https://revalenz.de',
   'https://benefizshow.de',
   'https://www.benefizshow.de',
-  'https://ecotrainer.revalenz.de',
   'http://localhost:5173', // Dev
   'http://localhost:3000'  // Dev
 ];
@@ -48,16 +47,13 @@ function normalizeUrl(url) {
  * @returns {string} Validated redirect URL
  */
 export function getValidatedRedirectUrl(state) {
-  // Support both 'returnUrl' (legacy) and 'redirect' (new) parameters
-  let returnUrl = state?.returnUrl || state?.redirect;
+  let returnUrl = state?.returnUrl;
   
   // Debug logging
   console.log('🔍 Redirect Debug - Raw State:', {
     stateType: typeof state,
     stateKeys: state ? Object.keys(state) : [],
-    rawReturnUrl: state?.returnUrl,
-    rawRedirect: state?.redirect,
-    finalReturnUrl: returnUrl,
+    rawReturnUrl: returnUrl,
     stateJSON: JSON.stringify(state, null, 2)
   });
   
@@ -77,7 +73,7 @@ export function getValidatedRedirectUrl(state) {
   
   // Fallback to environment-specific URL
   const fallback = `${process.env.FRONTEND_URL || 'https://www.revalenz.de'}/auth/callback`;
-  console.log('⚠️ Using fallback URL:', fallback, '(original returnUrl was:', state?.returnUrl, ', redirect was:', state?.redirect, ')');
+  console.log('⚠️ Using fallback URL:', fallback, '(original returnUrl was:', state?.returnUrl, ')');
   return fallback;
 }
 
