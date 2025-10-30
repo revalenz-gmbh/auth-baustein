@@ -5,6 +5,7 @@ const TRUSTED_DOMAINS = [
   'https://revalenz.de',
   'https://benefizshow.de',
   'https://www.benefizshow.de',
+  'https://ecotrainer.revalenz.de',
   'http://localhost:5173', // Dev
   'http://localhost:3000'  // Dev
 ];
