@@ -2,6 +2,7 @@ import express from 'express';
 import jwt from 'jsonwebtoken';
 import { query } from '../utils/db.js';
 import { getValidatedRedirectUrl } from '../utils/redirect.js';
+// lean mode: no external allowlist needed
 
 const router = express.Router();
 // Basic input validation (lightweight, no extra deps)
@@ -133,10 +134,10 @@ router.post('/refresh', async (req, res) => {
     const newRefresh = signRefreshToken(user);
     setRefreshCookie(res, newRefresh);
 
-    console.log('[AUDIT] refresh_success', { userId: String(user.id) });
+    // lean mode: no audit log
     return res.json({ success: true, token });
   } catch (e) {
-    console.error('[AUDIT] refresh_error', e?.message || e);
+    console.error('Refresh error:', e?.message || e);
     return res.status(500).json({ success: false, message: 'Internal error' });
   }
 });
@@ -165,7 +166,7 @@ router.post('/login', async (req, res) => {
     const refresh = signRefreshToken(user);
     setRefreshCookie(res, refresh);
     
-    console.log('[AUDIT] api_login_success', { userId: String(user.id) });
+    // lean mode: no audit log
     return res.json({ 
       success: true, 
       token, 
@@ -177,7 +178,7 @@ router.post('/login', async (req, res) => {
       } 
     });
   } catch (e) {
-    console.error('[AUDIT] api_login_error', e?.message || e);
+    console.error('API login error:', e?.message || e);
     return res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
@@ -203,6 +204,9 @@ router.get('/oauth/google', (req, res) => {
   });
   res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params}`);
 });
+
+// External flow: accept redirect=..., validate against ALLOWED_REDIRECT_ORIGINS
+// removed external endpoint in lean mode
 
 router.get('/oauth/google/callback', async (req, res) => {
   try {
@@ -274,11 +278,11 @@ router.get('/oauth/google/callback', async (req, res) => {
 
     // Redirect to frontend with token (validated for multi-tenant security)
     const redirectUrl = getValidatedRedirectUrl(state);
-    console.log('[AUDIT] oauth_success', { provider: 'google', userId: String(dbUser.id), redirectUrl });
+    // lean mode: no audit log
     return res.redirect(`${redirectUrl}?token=${token}`);
 
   } catch (error) {
-    console.error('[AUDIT] oauth_error', { provider: 'google', message: error?.message || 'oauth_failed' });
+    console.error('Google OAuth error:', error?.message || 'oauth_failed');
     try {
       // Try to derive redirect from state if present
       const fallback = `${process.env.FRONTEND_URL || 'https://www.revalenz.de'}/auth/callback`;
@@ -309,6 +313,8 @@ router.get('/oauth/github', (req, res) => {
   });
   res.redirect(`https://github.com/login/oauth/authorize?${params}`);
 });
+
+// removed external endpoint in lean mode
 
 router.get('/oauth/github/callback', async (req, res) => {
   try {
@@ -410,7 +416,7 @@ router.get('/oauth/github/callback', async (req, res) => {
     return res.redirect(`${redirectUrl}?token=${token}`);
 
   } catch (error) {
-    console.error('[AUDIT] oauth_error', { provider: 'github', message: error?.message || 'oauth_failed' });
+    console.error('GitHub OAuth error:', error?.message || 'oauth_failed');
     try {
       const fallback = `${process.env.FRONTEND_URL || 'https://www.revalenz.de'}/auth/callback`;
       const final = `${fallback}?error=oauth_failed&message=${encodeURIComponent(error?.message || 'oauth_failed')}`;
@@ -441,6 +447,8 @@ router.get('/oauth/microsoft', (req, res) => {
   });
   res.redirect(`https://login.microsoftonline.com/common/oauth2/v2.0/authorize?${params}`);
 });
+
+// removed external endpoint in lean mode
 
 router.get('/oauth/microsoft/callback', async (req, res) => {
   try {
@@ -515,7 +523,7 @@ router.get('/oauth/microsoft/callback', async (req, res) => {
     return res.redirect(`${redirectUrl}?token=${token}`);
     
   } catch (error) {
-    console.error('[AUDIT] oauth_error', { provider: 'microsoft', message: error?.message || 'oauth_failed' });
+    console.error('Microsoft OAuth error:', error?.message || 'oauth_failed');
     try {
       const fallback = `${process.env.FRONTEND_URL || 'https://www.revalenz.de'}/auth/callback`;
       const final = `${fallback}?error=oauth_failed&message=${encodeURIComponent(error?.message || 'oauth_failed')}`;
